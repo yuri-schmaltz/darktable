@@ -638,6 +638,9 @@ static int gtk_wrap(lua_State *L) {
              lua_tostring(L, lua_upvalueindex(2)),
              lua_tointeger(L, lua_upvalueindex(3)));
 #endif
+    if (darktable.lua_state.ending) {
+      return luaL_error(L, "darktable is shutting down");
+    }
     dt_lua_unlock();
     gtk_wrap_communication communication;
     g_mutex_init(&communication.end_mutex);
