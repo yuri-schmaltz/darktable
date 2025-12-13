@@ -45,6 +45,8 @@ The darktable user manual is maintained in the [dtdocs](https://github.com/darkt
 
 Lua API documentation is maintained in the [luadocs](https://github.com/darktable-org/luadocs) repository.
 
+See [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md) for a high-level overview of the codebase structure.
+
 Website
 -------
 
