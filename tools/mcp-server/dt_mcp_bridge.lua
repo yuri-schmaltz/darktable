@@ -351,5 +351,95 @@ dt.register_storage("mcp_cloud", "MCP Cloud Sync",
     end,
     nil, -- finalize
     nil, -- supported
-    nil  -- initialize
-)
+
+-- UI: MCP AI Assistant Panel
+local function create_ai_panel()
+    local widget = dt.new_widget("box")
+    widget.orientation = "vertical"
+
+    -- Section 1: AI Tools
+    local label_tools = dt.new_widget("label")
+    label_tools.label = "AI Tools"
+    
+    local btn_tag = dt.new_widget("button")
+    btn_tag.label = "Auto Tag Selection"
+    btn_tag.tooltip = "Analyze & Tag selected images using AI"
+    
+    local btn_cull = dt.new_widget("button")
+    btn_cull.label = "Smart Cull"
+    btn_cull.tooltip = "Score and cull selected images by sharpness"
+    
+    -- Section 2: Cloud Sync
+    local label_cloud = dt.new_widget("label")
+    label_cloud.label = "Cloud Sync Status"
+    
+    local status_cloud = dt.new_widget("label")
+    status_cloud.label = "Idle"
+    
+    -- Layout
+    widget[1] = label_tools
+    widget[2] = btn_tag
+    widget[3] = btn_cull
+    widget[4] = dt.new_widget("label") -- Spacer
+    widget[4].label = " "
+    widget[5] = label_cloud
+    widget[6] = status_cloud
+
+    -- Callbacks
+    dt.register_event("mcp_btn_tag", "clicked", function(w)
+        local selection = dt.gui.selection()
+        if #selection > 0 then
+            log("UI: Triggering Auto-Tag for " .. #selection .. " images")
+            -- We assume the Python server exposes 'auto_tag_selection' as a callable tool 
+            -- via the MCP protocol. However, since the bridge currently only PULLS commands 
+            -- or responds to 'store' export events, we need a way to trigger an action.
+            -- Using the same "queue file" trick as Cloud Sync for now, or just relying on
+            -- the fact that the server should be polling for generic valid requests if we implemented that.
+            
+            -- ACTUALLY: The current Python server architecture is polling for "commands" in `CMD_FILE`
+            -- which usually come from an external client (Claude). 
+            -- But we want the GUI to act as a client too?
+            -- Or we can write a "job" specific file.
+            
+            -- Let's re-use the `upload_queue` mechanism but make it generic `job_queue`?
+            -- OR simply write to a `mcp_gui_request.json` that the server also watches.
+             
+             local req = {
+                tool = "auto_tag_selection",
+                args = {} 
+            }
+            local q = DT_MCP_DIR .. "/gui_request_" .. os.time() .. ".json"
+            local f = io.open(q, "w")
+            if f then
+                f:write(json.encode(req))
+                f:close()
+                status_cloud.label = "Auto-Tag requested..."
+            end
+        else
+            dt.print("No images selected")
+        end
+    end, btn_tag)
+
+    dt.register_event("mcp_btn_cull", "clicked", function(w)
+         local selection = dt.gui.selection()
+        if #selection > 0 then
+             local req = {
+                tool = "cull_selection",
+                args = {} 
+            }
+            local q = DT_MCP_DIR .. "/gui_request_" .. os.time() .. ".json"
+            local f = io.open(q, "w")
+            if f then
+                f:write(json.encode(req))
+                f:close()
+                status_cloud.label = "Culling requested..."
+            end
+        else
+            dt.print("No images selected")
+        end
+    end, btn_cull)
+
+    return widget
+end
+
+dt.register_lib("mcp_ai_assistant", "MCP AI Assistant", true, false, {[dt.gui.views.lighttable] = {"DT_UI_CONTAINER_PANEL_RIGHT_CENTER", 100}}, create_ai_panel())

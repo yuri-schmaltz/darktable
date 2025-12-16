@@ -206,42 +206,78 @@ import dt_cloud
 import glob
 import time
 
+
 def monitor_uploads():
-    """Background thread to monitor and process upload requests."""
-    print("[Upload Monitor] Started monitoring for upload requests...")
+    """Background thread to monitor and process upload and GUI requests."""
+    print("[Upload Monitor] Started monitoring for requests...")
+    
+    # We map tool names from the GUI request to local functions
+    TOOL_MAP = {
+        "auto_tag_selection": auto_tag_selection,
+        "cull_selection": cull_selection
+    }
+    
     while True:
         try:
-            # Pattern matches upload requests
-            pattern = os.path.join(MCP_DIR, "upload_*.json")
-            files = glob.glob(pattern)
+            # 1. Check for UPLOAD requests
+            pattern_up = os.path.join(MCP_DIR, "upload_*.json")
+            files_up = glob.glob(pattern_up)
             
-            for f in files:
-                # Double check extension to avoid .tmp
+            for f in files_up:
                 if f.endswith(".tmp"): continue
-                
                 try:
                     with open(f, 'r') as json_file:
                         data = json.load(json_file)
                     
                     source = data.get("source_file")
-                    target = data.get("target")
-                    
                     if source and os.path.exists(source):
-                        print(f"[Upload Monitor] Processing {os.path.basename(source)}...")
+                        print(f"[Upload Monitor] Uploading {os.path.basename(source)}...")
                         success, msg = dt_cloud.upload_file(source)
-                        print(f"[Upload Monitor] Result: {msg}")
+                        print(f"[Upload Monitor] Upload Result: {msg}")
                     else:
-                        print(f"[Upload Monitor] Invalid request or file missing: {source}")
-                        
+                        print(f"[Upload Monitor] Invalid upload request: {source}")
                 except Exception as e:
-                    print(f"[Upload Monitor] Error processing {f}: {e}")
+                    print(f"[Upload Monitor] Error processing upload {f}: {e}")
                 
-                # Cleanup request file
                 try:
                     os.remove(f)
-                except:
-                    pass
+                except: pass
+            
+            # 2. Check for GUI requests (AI Tools)
+            pattern_gui = os.path.join(MCP_DIR, "gui_request_*.json")
+            files_gui = glob.glob(pattern_gui)
+            
+            for f in files_gui:
+                if f.endswith(".tmp"): continue
+                try:
+                    with open(f, 'r') as json_file:
+                        req = json.load(json_file)
                     
+                    tool_name = req.get("tool")
+                    args = req.get("args", {})
+                    
+                    print(f"[GUI Monitor] Detected request: {tool_name}")
+                    
+                    if tool_name in TOOL_MAP:
+                        # Execute the tool
+                        # Note: These tools currently take no args for selection, 
+                        # but might in future.
+                        func = TOOL_MAP[tool_name]
+                        result = func() # Capture output string
+                        print(f"[GUI Monitor] Tool Output: {result}")
+                        
+                        # TODO: Write back to a status file if we want the GUI label to update?
+                        # For now, just logging is enough as per plan.
+                    else:
+                        print(f"[GUI Monitor] Unknown tool: {tool_name}")
+                        
+                except Exception as e:
+                    print(f"[GUI Monitor] Error processing GUI request {f}: {e}")
+                
+                try:
+                    os.remove(f)
+                except: pass
+
             time.sleep(1) # Poll interval
         except Exception as e:
             print(f"[Upload Monitor] Fatal error: {e}")
