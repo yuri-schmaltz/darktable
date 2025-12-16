@@ -3,15 +3,14 @@ import os
 import json
 import sqlite3
 import time
+import threading
 from typing import Any, List, Optional
-import argparse
+import shutil
 
-# Check if mcp is installed, if not, we can't fully run, but we can scaffold the code.
-# In a real environment we'd rely on `pip install mcp`
+# Check if mcp is installed
 try:
     from mcp.server.fastmcp import FastMCP
 except ImportError:
-    # Dummy class for development/scaffolding if lib missing
     class FastMCP:
         def __init__(self, name): self.name = name
         def resource(self, uri): return lambda x: x
@@ -24,59 +23,94 @@ mcp = FastMCP("darktable")
 DT_CONFIG_DIR = os.path.expanduser("~/.config/darktable")
 DB_PATH = os.path.join(DT_CONFIG_DIR, "library.db")
 MCP_DIR = os.path.join(DT_CONFIG_DIR, "mcp")
+
+# Files
+CMD_TMP_FILE = os.path.join(MCP_DIR, "cmd.json.tmp")
 CMD_FILE = os.path.join(MCP_DIR, "cmd.json")
 RESP_FILE = os.path.join(MCP_DIR, "response.json")
 
+# Concurrency Lock
+cmd_lock = threading.Lock()
+
 def get_db_connection():
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    return conn
+    # Retry logic for locked DB
+    attempts = 0
+    while attempts < 3:
+        try:
+            conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+            conn.row_factory = sqlite3.Row
+            return conn
+        except sqlite3.OperationalError:
+            time.sleep(0.1)
+            attempts += 1
+    raise Exception("Database locked or inaccessible")
 
 def send_lua_command(cmd_name: str, args: dict) -> dict:
-    """Writes command to file and waits for response from Lua bridge."""
-    if not os.path.exists(MCP_DIR):
-        os.makedirs(MCP_DIR)
+    """Thread-safe, atomic command sending."""
+    with cmd_lock:
+        if not os.path.exists(MCP_DIR):
+            os.makedirs(MCP_DIR)
         
-    # Simple serialization: CMD|json_content
-    payload = f"{cmd_name}|{json.dumps(args)}"
-    
-    with open(CMD_FILE, "w") as f:
-        f.write(payload)
-        
-    # Wait for response (timeout 5s)
-    for _ in range(50):
+        # Clean up any stale response file
         if os.path.exists(RESP_FILE):
-             with open(RESP_FILE, "r") as f:
-                 resp = f.read()
-             if resp:
-                 # Clear response file
-                 open(RESP_FILE, 'w').close()
-                 return json.loads(resp)
-        time.sleep(0.1)
+             os.remove(RESP_FILE)
+
+        # JSON payload
+        payload = json.dumps({"cmd": cmd_name, "args": args})
         
-    return {"status": "error", "error": "Timeout waiting for Lua bridge"}
+        # Atomic Write: Write to tmp then rename
+        with open(CMD_TMP_FILE, "w") as f:
+            f.write(payload)
+            
+        os.rename(CMD_TMP_FILE, CMD_FILE)
+            
+        # Wait for response (timeout 5s)
+        for _ in range(50):
+            if os.path.exists(RESP_FILE):
+                 # Give a tiny buffer for the atomic move to finish on file system (though rename is atomic)
+                 try:
+                     with open(RESP_FILE, "r") as f:
+                         resp_content = f.read()
+                     
+                     if resp_content:
+                         os.remove(RESP_FILE)
+                         try:
+                             return json.loads(resp_content)
+                         except json.JSONDecodeError:
+                             return {"status": "error", "error": "Invalid JSON response from bridge"}
+                 except FileNotFoundError:
+                     pass # Race condition check
+            time.sleep(0.1)
+            
+        return {"status": "error", "error": "Timeout waiting for Lua bridge"}
 
 @mcp.resource("darktable://images")
 def list_images() -> str:
     """List recent images from the library."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, filename, rating FROM images ORDER BY id DESC LIMIT 50")
-    images = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-    return json.dumps(images, indent=2)
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, filename, rating FROM images ORDER BY id DESC LIMIT 50")
+        images = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return json.dumps(images, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 @mcp.tool()
 def get_image_details(img_id: int) -> str:
     """Get detailed metadata for a specific image ID."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM images WHERE id = ?", (img_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return json.dumps(dict(row), indent=2)
-    return "Image not found"
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM images WHERE id = ?", (img_id,))
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            return json.dumps(dict(row), indent=2)
+        return "Image not found"
+    except Exception as e:
+         return str(e)
 
 @mcp.tool()
 def set_rating(img_id: int, rating: int) -> str:

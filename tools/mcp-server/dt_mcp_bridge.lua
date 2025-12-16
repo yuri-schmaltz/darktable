@@ -2,13 +2,154 @@ local dt = require "darktable"
 local du = require "lib/dtutils"
 
 -- Configuration
-local KEEP_ALIVE_INTERVAL = 500 -- check every 500ms
+local KEEP_ALIVE_INTERVAL = 250 -- check every 250ms for responsiveness
 local MCP_DIR = dt.configuration.config_dir .. "/mcp"
 local CMD_FILE = MCP_DIR .. "/cmd.json"
+local PROC_FILE = MCP_DIR .. "/processing.json" -- Atomic move target
+local RESP_TMP_FILE = MCP_DIR .. "/response.json.tmp"
 local RESP_FILE = MCP_DIR .. "/response.json"
+local LOCK_FILE = MCP_DIR .. "/bridge.lock"
 
 -- Ensure MCP directory exists
 dt.configuration.check_user_config_dir("mcp")
+
+-- Logging
+local function log(msg)
+    dt.print_log("[MCP Bridge] " .. tostring(msg))
+end
+
+-- ============================================================
+-- JSON Parser (Embedded for standalone robustness)
+-- Based on json.lua (MIT) - lightweight
+-- ============================================================
+local json = {}
+local function kind_of(obj)
+  if type(obj) ~= 'table' then return type(obj) end
+  local i = 1
+  for _ in pairs(obj) do
+    if obj[i] ~= nil then i = i + 1 else return 'table' end
+  end
+  if i == 1 then return 'table' else return 'array' end
+end
+
+local function escape_str(s)
+  local in_char  = {'\\', '"', '/', '\b', '\f', '\n', '\r', '\t'}
+  local out_char = {'\\', '"', '/',  'b',  'f',  'n',  'r',  't'}
+  for i, c in ipairs(in_char) do
+    s = s:gsub(c, '\\' .. out_char[i])
+  end
+  return s
+end
+
+local function skip_delim(str, pos, delim, err_if_missing)
+  pos = pos + #str:match('^%s*', pos)
+  if str:sub(pos, pos) ~= delim then
+    if err_if_missing then error('Expected ' .. delim .. ' near position ' .. pos) end
+    return pos, false
+  end
+  return pos + 1, true
+end
+
+local function parse_str_val(str, pos, val)
+  val = val or ''
+  local early_end_error = 'End of input found while parsing string.'
+  if pos > #str then error(early_end_error) end
+  local c = str:sub(pos, pos)
+  if c == '"'  then return val, pos + 1 end
+  if c ~= '\\' then return parse_str_val(str, pos + 1, val .. c) end
+  -- Escaped characters
+  local next_c = str:sub(pos + 1, pos + 1)
+  if not next_c then error(early_end_error) end
+  return parse_str_val(str, pos + 2, val .. next_c)
+end
+
+local function parse_num_val(str, pos)
+  local num_str = str:match('^-?%d+%.?%d*[eE]?[+-]?%d*', pos)
+  local val = tonumber(num_str)
+  if not val then error('Error parsing number at position ' .. pos) end
+  return val, pos + #num_str
+end
+
+function json.encode(obj, as_key)
+  local s = {}
+  local kind = kind_of(obj)
+  if kind == 'array' then
+    if as_key then error('Can\'t encode array as key.') end
+    s[#s + 1] = '['
+    for i, val in ipairs(obj) do
+      if i > 1 then s[#s + 1] = ', ' end
+      s[#s + 1] = json.encode(val)
+    end
+    s[#s + 1] = ']'
+  elseif kind == 'table' then
+    if as_key then error('Can\'t encode table as key.') end
+    s[#s + 1] = '{'
+    local first = true
+    for k, v in pairs(obj) do
+      if not first then s[#s + 1] = ', ' end
+      first = false
+      s[#s + 1] = json.encode(k, true)
+      s[#s + 1] = ':'
+      s[#s + 1] = json.encode(v)
+    end
+    s[#s + 1] = '}'
+  elseif kind == 'string' then
+    return '"' .. escape_str(obj) .. '"'
+  elseif kind == 'number' then
+    return as_key and '"' .. tostring(obj) .. '"' or tostring(obj)
+  elseif kind == 'boolean' then
+    return tostring(obj)
+  elseif kind == 'nil' then
+    return 'null'
+  else
+    error('Unjsonifiable type: ' .. kind .. '.')
+  end
+  return table.concat(s)
+end
+
+function json.decode(str, pos, end_delim)
+  pos = pos or 1
+  if pos > #str then error('Reached unexpected end of input.') end
+  local pos = pos + #str:match('^%s*', pos)
+  local first = str:sub(pos, pos)
+  if first == '{' then
+    local obj, key, delim_found = {}, true, true
+    pos = pos + 1
+    while true do
+      key, pos = json.decode(str, pos, '}')
+      if key == nil then return obj, pos end
+      if not delim_found then error('Comma missing between object items.') end
+      pos = skip_delim(str, pos, ':', true)
+      obj[key], pos = json.decode(str, pos)
+      pos, delim_found = skip_delim(str, pos, ',')
+    end
+  elseif first == '[' then
+    local arr, val, delim_found = {}, true, true
+    pos = pos + 1
+    while true do
+      val, pos = json.decode(str, pos, ']')
+      if val == nil then return arr, pos end
+      if not delim_found then error('Comma missing between array items.') end
+      arr[#arr + 1] = val
+      pos, delim_found = skip_delim(str, pos, ',')
+    end
+  elseif first == '"' then
+    return parse_str_val(str, pos + 1)
+  elseif first == '-' or first:match('%d') then
+    return parse_num_val(str, pos)
+  elseif first == end_delim then
+    return nil, pos + 1
+  else
+    local literals = {['true'] = true, ['false'] = false, ['null'] = nil}
+    for lit_str, lit_val in pairs(literals) do
+      local lit_len = #lit_str
+      if str:sub(pos, pos + lit_len - 1) == lit_str then return lit_val, pos + lit_len end
+    end
+    error('Invalid JSON syntax starting at ' .. pos)
+  end
+end
+-- ============================================================
+
 
 -- Define available API commands
 local commands = {}
@@ -22,6 +163,17 @@ function commands.set_rating(args)
     
     img.rating = rating
     return { success = true, id = img_id, new_rating = img.rating }
+end
+
+function commands.set_color_label(args)
+    local img_id = args.img_id
+    local color = args.color -- "red", "yellow", "green", "blue", "purple"
+    local img = dt.database.get_image(img_id)
+    
+    if not img then error("Image not found: " .. img_id) end
+    
+    dt.colorlabels.add_label(img, color)
+    return { success = true, id = img_id, label_added = color }
 end
 
 function commands.attach_tag(args)
@@ -57,6 +209,7 @@ function commands.apply_style(args)
     return { success = true, id = img_id, style_applied = style_name }
 end
 
+
 -- Helper to read file content
 local function read_file(path)
     local f = io.open(path, "r")
@@ -74,67 +227,72 @@ local function write_file(path, content)
     f:close()
 end
 
--- Helper to simple json parse/encode (avoiding external deps if possible, but here we assume rudimentary structure)
--- For robustness effectively we'd want a JSON lib, but for this bridge we'll do simple string matching or assume users have a json lib
--- To make this standalone without deps, we'll try to rely on python handling the complex data and us just reading simple keys
--- ACTUALLY: We will use `dkjson` if available, or a simple regex parser for our known commands. 
--- Since we are in Darktable Lua, let's assume valid JSON input from our Python script.
--- For simplicity in this Proof-of-Concept, we'll use a hacky parser since we control the input format strictly from Python.
 
-local function parse_json(str)
-   -- Very basic parser, assumes flat object: {"cmd": "set_rating", "args": {"img_id": 123, "rating": 5}}
-   -- In production, bundle dkjson.lua
-   -- Here we rely on the implementation plan's Python side to send strict formatted JSON
-   
-   -- Mock implementation: In reality, we need to load a json library. 
-   -- Darktable often includes libs. Let's try to verify if we can use one.
-   -- For now, let's write a dummy return that we'd replace with real JSON parsing
-   return nil 
-end
+local function process_commands()
+    -- Check if command file exists
+    local f = io.open(CMD_FILE, "r")
+    if not f then return end -- No command
+    f:close()
 
--- Since we can't easily rely on a JSON lib being present without installing it, 
--- we will make the Python side write LUA CODE that we execute. This is safer for dependencies but riskier for security.
--- given this is a local tool, we'll assume `dofile`.
--- ALTERNATIVE: Use a simple text protocol.
--- COMMAND|ARG1|ARG2...
+    -- Atomic processing: Try to rename cmd.json -> processing.json
+    -- os.rename handles atomic move on POSIX
+    local success, err = os.rename(CMD_FILE, PROC_FILE)
+    if not success then
+        -- Could be race condition, or permission. Log and retry next tick
+        log("Failed to rename command file: " .. tostring(err))
+        return
+    end
 
-local function check_command()
-    local content = read_file(CMD_FILE)
-    if not content or content == "" then return end
-    
-    -- Clear file immediately to prevent double execution
-    write_file(CMD_FILE, "")
-    
-    -- Protocol: CMD_NAME|JSON_ARGS
-    local cmd_name, json_args = content:match("^(.-)|(.*)$")
-    
-    if not cmd_name then return end
-    
-    local status, result
-    
-    -- Very basic JSON-like parser for the arguments we support
-    -- We'll assume the Python side formats standard args
-    local args = {}
-    for k,v in json_args:gmatch([["(%w+)":%s*"?([^",}]+)"?]]) do
-        if tonumber(v) then args[k] = tonumber(v) else args[k] = v end
+    -- Now we exclusively own PROC_FILE
+    local content = read_file(PROC_FILE)
+    if not content or content == "" then 
+        os.remove(PROC_FILE)
+        return 
     end
     
-    if commands[cmd_name] then
-        status, result = pcall(commands[cmd_name], args)
+    log("Received command payload: " .. content)
+
+    local request = nil
+    local status_parse, res_parse = pcall(json.decode, content)
+    
+    local result_payload = {}
+    
+    if status_parse and res_parse then
+        request = res_parse
+        local cmd_name = request.cmd
+        local args = request.args or {}
+        
+        if commands[cmd_name] then
+            log("Executing command: " .. cmd_name)
+            local status_exec, res_exec = pcall(commands[cmd_name], args)
+            if status_exec then
+                result_payload = { status = "ok", data = res_exec }
+            else
+                result_payload = { status = "error", error = tostring(res_exec) }
+                log("Command error: " .. tostring(res_exec))
+            end
+        else
+            result_payload = { status = "error", error = "Unknown command: " .. tostring(cmd_name) }
+            log("Unknown command: " .. tostring(cmd_name))
+        end
     else
-        status = false
-        result = "Unknown command: " .. cmd_name
+        result_payload = { status = "error", error = "JSON parse error: " .. tostring(res_parse) }
+        log("JSON parse error")
     end
     
-    local resp_str
-    if status then
-        resp_str = '{"status": "ok", "data": "' .. tostring(result) .. '"}'
-    else
-        resp_str = '{"status": "error", "error": "' .. tostring(result) .. '"}'
-    end
+    -- Serialize Response
+    local resp_str = json.encode(result_payload)
     
-    write_file(RESP_FILE, resp_str)
+    -- Write to temp file first
+    write_file(RESP_TMP_FILE, resp_str)
+    
+    -- Atomic rename to response.json
+    os.rename(RESP_TMP_FILE, RESP_FILE)
+    
+    -- Clean up processing file
+    os.remove(PROC_FILE)
 end
 
 -- Start polling
-dt.register_event("mcp_poller", KEEP_ALIVE_INTERVAL, check_command)
+dt.register_event("mcp_poller", KEEP_ALIVE_INTERVAL, process_commands)
+log("MCP Bridge initialized and polling...")
