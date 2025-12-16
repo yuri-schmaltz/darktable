@@ -23,6 +23,19 @@ hang around to maintain it.
 
 For more places to discuss darktable, [see here for more information](https://www.darktable.org/contact/). 
 
+### Testing
+
+We encourage running tests to ensure your changes don't break existing functionality. Darktable uses `ctest` (part of CMake) for testing.
+
+1.  **Build the project** (see [README.md](README.md#building)).
+2.  **Run tests**:
+    ```bash
+    cd build
+    ctest --output-on-failure
+    ```
+
+Please add new unit tests in `src/tests/unittests/` when adding new features or fixing bugs in core logic. 
+
 ### Coding style
 
 We like our code to be properly formatted. We have a well-defined coding style, 

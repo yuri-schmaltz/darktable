@@ -79,14 +79,6 @@ int dt_lua_treated_pcall(lua_State *L, int nargs, int nresults) {
   * each job-queuing function has it own callback, but eventually call
   run_async_thread
 
-  TODO
-  * redo the old yield (override lua primitives)
-  * check all call, pcall etc... sites
-  * lua lock et recursivité
-  * réimplémenter l'intégration avec la boucle gtk pour mieux faire le bounce
-  ? add a name in the thread stack for debug purpose
-  * two pcall with no tracebacks: call.c and lua.c
-
    */
 
 static int save_thread(lua_State *L) {

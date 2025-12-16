@@ -33,6 +33,29 @@ Darktable uses CMake for its build system.
 - **Build**: `./build.sh` (wrapper around cmake)
 - **Test**: `ctest` is used for running the test suite.
 
+## Support Directories
+
+Beyond the core source code, the repository contains several important directories:
+
+### `tools/`
+Contains maintenance and development scripts, including:
+- **Introspection**: Scripts to generate Lua API documentation and bindings.
+- **Noise Profiling**: Tools for creating camera noise profiles.
+- **Assets**: Scripts for generating icons/SVG assets.
+- **Database**: Migration and consistency check scripts.
+
+### `packaging/`
+Holds platform-specific packaging instructions and scripts:
+- **`linux/`**: desktop files and integration.
+- **`macosx/`**: Scripts for building the macOS disk image.
+- **`windows/`**: Scripts for the Windows installer.
+
+### `src/tests/`
+The testing infrastructure is divided into:
+- **`unittests/`**: Unit tests for individual IOPs and utility functions.
+- **`integration/`**: Integration tests (currently under development).
+- **`benchmark/`**: Performance benchmarking tools.
+
 ## Contributing
 
 Please refer to `CONTRIBUTING.md` for guidelines on coding style, submission processes, and communication channels.
