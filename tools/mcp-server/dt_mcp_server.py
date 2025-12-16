@@ -136,8 +136,8 @@ def apply_style(img_id: int, style_name: str) -> str:
     return json.dumps(result)
 
 @mcp.tool()
-def auto_tag_selection() -> str:
-    """Automatically analyzes selected images and adds descriptive tags."""
+def auto_tag_selection(args: dict = {}) -> str:
+    """Automatically analyzes selected images and adds descriptive tags. Args: {'ai_sensitivity': 'Strict'|'Normal'} """
     # 1. Get selection from Lua
     resp = send_lua_command("get_selection", {})
     if resp.get("status") != "ok":
@@ -164,8 +164,9 @@ def auto_tag_selection() -> str:
     return "\n".join(results)
 
 @mcp.tool()
-def cull_selection() -> str:
-    """Analyzes sharpness of selected images. Picks the best one (Green label) and rejects others (Red label)."""
+def cull_selection(args: dict = {}) -> str:
+    """Analyzes sharpness of selected images. Args: {'ai_sensitivity': 'Strict'|'Normal'}"""
+    # 1. Get selection
     # 1. Get selection
     resp = send_lua_command("get_selection", {})
     if resp.get("status") != "ok":
@@ -251,9 +252,11 @@ def monitor_uploads():
                         data = json.load(json_file)
                     
                     source = data.get("source_file")
+                    target_remote = data.get("target_remote", "remote:photos")
+                    
                     if source and os.path.exists(source):
-                        print(f"[Upload Monitor] Uploading {os.path.basename(source)}...")
-                        success, msg = dt_cloud.upload_file(source)
+                        print(f"[Upload Monitor] Uploading {os.path.basename(source)} to {target_remote}...")
+                        success, msg = dt_cloud.upload_file(source, target_remote)
                         print(f"[Upload Monitor] Upload Result: {msg}")
                         write_gui_status(f"Upload: {msg}", is_error=not success)
                     else:
@@ -280,13 +283,15 @@ def monitor_uploads():
                     tool_name = req.get("tool")
                     args = req.get("args", {})
                     
-                    print(f"[GUI Monitor] Detected request: {tool_name}")
+                    print(f"[GUI Monitor] Detected request: {tool_name} with args {args}")
                     write_gui_status(f"Running {tool_name}...")
                     
                     if tool_name in TOOL_MAP:
                         # Execute the tool
                         func = TOOL_MAP[tool_name]
-                        result = func() # Capture output string
+                        # Pass args if tool accepts them (we will update tools to accept **kwargs)
+                        # For now, just pass args as a dict
+                        result = func(args) 
                         print(f"[GUI Monitor] Tool Output: {result}")
                         
                         # Write success status

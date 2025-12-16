@@ -324,9 +324,12 @@ dt.register_storage("mcp_cloud", "MCP Cloud Sync",
         -- The Python server should expose an endpoint or watch a file.
         -- Let's write to "~/.config/darktable/mcp/upload_queue.json"
         
+        local remote = dt.preferences.read("mcp", "cloud_remote", "string") or "remote:photos"
+
         local upload_req = {
             source_file = filename,
             target = "cloud",
+            target_remote = remote,
             img_id = image.id
         }
         
@@ -376,6 +379,18 @@ local function create_ai_panel()
     local status_cloud = dt.new_widget("label")
     status_cloud.label = "Idle"
     
+    -- Section 3: Settings
+    local label_settings = dt.new_widget("label")
+    label_settings.label = "-- Settings --"
+
+    local entry_remote = dt.new_widget("entry")
+    entry_remote.text = dt.preferences.read("mcp", "cloud_remote", "string") or "remote:photos"
+    entry_remote.tooltip = "Rclone remote name (e.g., remote:photos)"
+    
+    local entry_sensitivity = dt.new_widget("entry")
+    entry_sensitivity.text = dt.preferences.read("mcp", "ai_sensitivity", "string") or "Normal"
+    entry_sensitivity.tooltip = "AI Sensitivity (Strict/Normal/Loose)"
+
     -- Layout
     widget[1] = label_tools
     widget[2] = btn_tag
@@ -384,29 +399,30 @@ local function create_ai_panel()
     widget[4].label = " "
     widget[5] = label_cloud
     widget[6] = status_cloud
+    widget[7] = dt.new_widget("label") -- Spacer
+    widget[7].label = " "
+    widget[8] = label_settings
+    widget[9] = entry_remote
+    widget[10] = entry_sensitivity
+
+    -- Save Preferences Trigger (on leaving widget or explicit save?)
+    -- Simple approach: Save when executing commands.
 
     -- Callbacks
     dt.register_event("mcp_btn_tag", "clicked", function(w)
         local selection = dt.gui.selection()
+        
+        -- Save stats
+        dt.preferences.write("mcp", "cloud_remote", "string", entry_remote.text)
+        dt.preferences.write("mcp", "ai_sensitivity", "string", entry_sensitivity.text)
+
         if #selection > 0 then
             log("UI: Triggering Auto-Tag for " .. #selection .. " images")
-            -- We assume the Python server exposes 'auto_tag_selection' as a callable tool 
-            -- via the MCP protocol. However, since the bridge currently only PULLS commands 
-            -- or responds to 'store' export events, we need a way to trigger an action.
-            -- Using the same "queue file" trick as Cloud Sync for now, or just relying on
-            -- the fact that the server should be polling for generic valid requests if we implemented that.
-            
-            -- ACTUALLY: The current Python server architecture is polling for "commands" in `CMD_FILE`
-            -- which usually come from an external client (Claude). 
-            -- But we want the GUI to act as a client too?
-            -- Or we can write a "job" specific file.
-            
-            -- Let's re-use the `upload_queue` mechanism but make it generic `job_queue`?
-            -- OR simply write to a `mcp_gui_request.json` that the server also watches.
-             
              local req = {
                 tool = "auto_tag_selection",
-                args = {} 
+                args = {
+                    ai_sensitivity = entry_sensitivity.text
+                } 
             }
             local q = DT_MCP_DIR .. "/gui_request_" .. os.time() .. ".json"
             local f = io.open(q, "w")
@@ -422,10 +438,17 @@ local function create_ai_panel()
 
     dt.register_event("mcp_btn_cull", "clicked", function(w)
          local selection = dt.gui.selection()
+
+         -- Save stats
+        dt.preferences.write("mcp", "cloud_remote", "string", entry_remote.text)
+        dt.preferences.write("mcp", "ai_sensitivity", "string", entry_sensitivity.text)
+
         if #selection > 0 then
              local req = {
                 tool = "cull_selection",
-                args = {} 
+                args = {
+                    ai_sensitivity = entry_sensitivity.text
+                } 
             }
             local q = DT_MCP_DIR .. "/gui_request_" .. os.time() .. ".json"
             local f = io.open(q, "w")
@@ -462,7 +485,7 @@ local function create_ai_panel()
         check_status()
     end, btn_refresh)
     
-    widget[7] = btn_refresh
+    widget[11] = btn_refresh
     
     -- Initial Check
     check_status()
