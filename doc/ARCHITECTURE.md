@@ -27,6 +27,12 @@ Darktable features a powerful Lua API that allows users to interact with the dat
 ### Database
 Darktable uses SQLite for its library database (`library.db`) and data database (`data.db`). The `src/common/database.c` module manages these connections.
 
+### AI & Extensions Architecture (The Bridge)
+Darktable integrates modern AI capabilities via a **Decoupled Bridge Architecture**.
+1.  **Lua Frontend**: Runs inside Darktable's variable-lock thread, handling UI and events.
+2.  **Python Backend**: Runs as an independent `mcp-server` process, handling heavy ML inference (OpenCV, PyTorch).
+3.  **Communication**: Done via **Atomic File Operations** (JSON) in `~/.config/darktable/mcp/`. This ensures thread safety and isolates Darktable from Python crashes.
+
 ## Building and Testing
 
 Darktable uses CMake for its build system. 
