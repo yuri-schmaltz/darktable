@@ -228,6 +228,33 @@ def generate_mask(args: dict = {}) -> str:
             
     return "\n".join(results)
 
+@mcp.tool()
+def generative_edit(args: dict = {}) -> str:
+    """Opens an editor to heal/remove objects from selected images."""
+    # 1. Get selection
+    resp = send_lua_command("get_selection", {})
+    if resp.get("status") != "ok":
+         return "Failed to get selection: " + resp.get("error")
+         
+    selection = resp.get("data", [])
+    if not selection:
+        return "No images selected."
+
+    results = []
+    for img in selection:
+        path = img["path"]
+        write_gui_status(f"Opening editor for {os.path.basename(path)}...")
+        
+        # This will block until editor is closed
+        out_path, status = dt_cv_utils.open_inpainting_editor(path)
+        
+        if out_path:
+            results.append(f"Inpainted: {os.path.basename(out_path)} ({status})")
+        else:
+            results.append(f"Cancelled: {os.path.basename(path)} ({status})")
+            
+    return "\n".join(results)
+
 
 import dt_cloud
 import glob
@@ -262,7 +289,8 @@ def monitor_uploads():
     TOOL_MAP = {
         "auto_tag_selection": auto_tag_selection,
         "cull_selection": cull_selection,
-        "generate_mask": generate_mask
+        "generate_mask": generate_mask,
+        "generative_edit": generative_edit
     }
     
     while True:

@@ -58,9 +58,48 @@ class TestCVUtils(unittest.TestCase):
             
             mask_path, status = dt_cv_utils.generate_mask(self.test_img)
             
+            
             self.assertIsNotNone(mask_path)
             self.assertTrue(mask_path.endswith("_mask.png"))
             self.assertIn("Fallback", status)
+
+    @unittest.mock.patch('dt_cv_utils.cv2')
+    def test_generative_edit_flow(self, mock_cv2):
+        """Test the generative edit flow (editor + inpainting)."""
+        dt_cv_utils.HAS_OPENCV = True
+        
+        # Mock Image
+        mock_img = unittest.mock.MagicMock()
+        mock_img.shape = (100, 100, 3)
+        mock_img.copy.return_value = mock_img # simplify copy
+        mock_cv2.imread.return_value = mock_img
+        
+        # Mock GUI calls
+        mock_cv2.namedWindow.return_value = None
+        mock_cv2.setMouseCallback.return_value = None
+        mock_cv2.imshow.return_value = None
+        mock_cv2.destroyWindow.return_value = None
+        
+        # Mock waitKey to return 'Enter' (13) immediately
+        mock_cv2.waitKey.return_value = 13 
+        
+        # Mock Inpainting
+        mock_inpainted = unittest.mock.MagicMock()
+        mock_cv2.inpaint.return_value = mock_inpainted
+        mock_cv2.imwrite.return_value = True
+        
+        # Run
+        out_path, status = dt_cv_utils.open_inpainting_editor(self.test_img)
+        
+        # Assertions
+        self.assertIsNotNone(out_path)
+        self.assertTrue(out_path.endswith("_inpainted.jpg"))
+        self.assertIn("Inpainting successful", status)
+        
+        # Verify calls
+        mock_cv2.namedWindow.assert_called()
+        mock_cv2.inpaint.assert_called()
+        mock_cv2.imwrite.assert_called()
 
 if __name__ == '__main__':
     unittest.main()

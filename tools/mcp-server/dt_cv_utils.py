@@ -164,3 +164,84 @@ def generate_mask(image_path):
         return None, f"Mask generation failed: {e}"
 
     return None, "No suitable libraries found"
+
+# --- Generative Edit / Inpainting ---
+
+class MaskEditor:
+    def __init__(self, image, win_name="Generative Edit - Paint Mask (Red)"):
+        self.image = image
+        self.mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        self.drawing = False
+        self.brush_size = 20
+        self.win_name = win_name
+        self.display_image = image.copy()
+        
+    def mouse_callback(self, event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            self.drawing = True
+            cv2.circle(self.mask, (x, y), self.brush_size, 255, -1)
+            cv2.circle(self.display_image, (x, y), self.brush_size, (0, 0, 255), -1)
+            
+        elif event == cv2.EVENT_MOUSEMOVE:
+            if self.drawing:
+                cv2.circle(self.mask, (x, y), self.brush_size, 255, -1)
+                cv2.circle(self.display_image, (x, y), self.brush_size, (0, 0, 255), -1)
+                
+        elif event == cv2.EVENT_LBUTTONUP:
+            self.drawing = False
+            
+    def run(self):
+        cv2.namedWindow(self.win_name)
+        cv2.setMouseCallback(self.win_name, self.mouse_callback)
+        
+        print("Draw mask with mouse. Press ENTER to apply, 'r' to reset, 'q' to quit.")
+        
+        while True:
+            cv2.imshow(self.win_name, self.display_image)
+            key = cv2.waitKey(20) & 0xFF
+            
+            if key == 13: # Enter
+                cv2.destroyWindow(self.win_name)
+                return self.mask
+            elif key == ord('r'):
+                self.mask[:] = 0
+                self.display_image = self.image.copy()
+            elif key == ord('q'):
+                cv2.destroyWindow(self.win_name)
+                return None
+        return None
+
+def open_inpainting_editor(image_path):
+    """
+    Opens an OpenCV window to paint a mask.
+    Returns: (output_path, status)
+    """
+    if not HAS_OPENCV:
+        return None, "OpenCV not available"
+        
+    if not os.path.exists(image_path):
+        return None, "File not found"
+        
+    try:
+        img = cv2.imread(image_path)
+        if img is None: return None, "Failed to read image"
+        
+        editor = MaskEditor(img)
+        mask = editor.run()
+        
+        if mask is not None:
+            # Apply Inpainting
+            # Telea algorithm is good for small defects
+            radius = 3
+            inpainted = cv2.inpaint(img, mask, radius, cv2.INPAINT_TELEA)
+            
+            base, ext = os.path.splitext(image_path)
+            out_path = f"{base}_inpainted.jpg"
+            cv2.imwrite(out_path, inpainted)
+            
+            return out_path, "Inpainting successful"
+        else:
+            return None, "Edit cancelled"
+            
+    except Exception as e:
+        return None, f"Editor failed: {e}"

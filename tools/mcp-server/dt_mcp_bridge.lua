@@ -395,29 +395,28 @@ local function create_ai_panel()
     btn_mask.label = "Generate Mask"
     btn_mask.tooltip = "Generate a Raster Mask (PNG) for the subject"
 
+    local btn_gen_edit = dt.new_widget("button")
+    btn_gen_edit.label = "Generative Edit"
+    btn_gen_edit.tooltip = "Open external editor to heal/remove objects"
+
     -- Layout
     widget[1] = label_tools
     widget[2] = btn_tag
     widget[3] = btn_cull
     widget[4] = btn_mask
-    widget[5] = dt.new_widget("label") -- Spacer
-    widget[5].label = " "
-    widget[6] = label_cloud
-    widget[7] = status_cloud
-    widget[8] = dt.new_widget("label") -- Spacer
-    widget[8].label = " "
-    widget[9] = label_settings
-    widget[10] = entry_remote
-    widget[11] = entry_sensitivity
+    widget[5] = btn_gen_edit
+    widget[6] = dt.new_widget("label") -- Spacer
+    widget[6].label = " "
+    widget[7] = label_cloud
+    widget[8] = status_cloud
+    widget[9] = dt.new_widget("label") -- Spacer
+    widget[9].label = " "
+    widget[10] = label_settings
+    widget[11] = entry_remote
+    widget[12] = entry_sensitivity
     
-    -- Re-assign refresh button index (shifted by 1)
-    widget[12] = widget[11] -- (The refresh button was at 11 previously, but we need to find where it was defined or just reassign it if we have reference)
-    -- Actually, `create_ai_panel` function ends later. I should just insert it in the list.
-    -- To avoid index confusion, let's just use table.insert if it was a table, but it's a userdata 'box'.
-    -- The indices must be sequential? Lua widgets in boxes are usually added via table assignment.
-    -- Let's stick to explicit assignment as before. 
-    -- BUT wait, I need to check where `btn_refresh` is assigned. It was assigned to widget[11] in previous step!
-    -- So now it should be widget[12].
+    -- Re-assign refresh button index (shifted)
+    -- widget[13] will be assigned below
 
     -- Callbacks
     dt.register_event("mcp_btn_mask", "clicked", function(w)
@@ -445,6 +444,28 @@ local function create_ai_panel()
             dt.print("No images selected")
         end
     end, btn_mask)
+
+    dt.register_event("mcp_btn_gen_edit", "clicked", function(w)
+        local selection = dt.gui.selection()
+        
+        if #selection > 0 then
+             local req = {
+                tool = "generative_edit",
+                args = {
+                    ai_sensitivity = entry_sensitivity.text
+                } 
+            }
+            local q = DT_MCP_DIR .. "/gui_request_" .. os.time() .. ".json"
+            local f = io.open(q, "w")
+            if f then
+                f:write(json.encode(req))
+                f:close()
+                status_cloud.label = "Opening editor..."
+            end
+        else
+            dt.print("No images selected")
+        end
+    end, btn_gen_edit)
 
     -- Save Preferences Trigger (on leaving widget or explicit save?)
     -- Simple approach: Save when executing commands.
@@ -526,7 +547,7 @@ local function create_ai_panel()
         check_status()
     end, btn_refresh)
     
-    widget[12] = btn_refresh
+    widget[13] = btn_refresh
     
     -- Initial Check
     check_status()
