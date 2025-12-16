@@ -57,6 +57,11 @@ set(CMAKE_CXX_INCLUDE_WHAT_YOU_USE_SAVE "${CMAKE_CXX_INCLUDE_WHAT_YOU_USE}")
 unset(CMAKE_CXX_CLANG_TIDY)
 unset(CMAKE_CXX_INCLUDE_WHAT_YOU_USE)
 
+
+# Enable bundled Pugixml for RawSpeed
+set(USE_BUNDLED_PUGIXML ON CACHE BOOL "" FORCE)
+set(ALLOW_DOWNLOADING_PUGIXML ON CACHE BOOL "" FORCE)
+
 add_subdirectory(rawspeed ${DARKTABLE_LIBDIR}/rawspeed)
 # Copying rawspeed resources to where dt expects them
 add_custom_target("deploy" ALL)
