@@ -101,5 +101,33 @@ class TestCVUtils(unittest.TestCase):
         mock_cv2.inpaint.assert_called()
         mock_cv2.imwrite.assert_called()
 
+    def test_auto_develop_logic(self):
+        """Test exposure analysis and style generation."""
+        # 1. Analyze (dummy file -> 0.0 or mocked)
+        bias = dt_cv_utils.analyze_exposure(self.test_img)
+        # With 0-byte dummy, analyze_exposure should handle it gracefully (return 0.0 or exception -> 0.0)
+        # analyze_exposure returns 0.0 if file exists but error or empty?
+        # My implementation: cv2.read -> None -> returns 0.0. Good.
+        self.assertEqual(bias, 0.0)
+        
+        # 2. Generate Style
+        out_dir = "/tmp"
+        dummy_bias = 0.5
+        style_path = dt_cv_utils.generate_dtstyle(dummy_bias, out_dir)
+        
+        self.assertTrue(os.path.exists(style_path))
+        self.assertTrue(style_path.endswith(".dtstyle"))
+        
+        with open(style_path, 'r') as f:
+            content = f.read()
+            self.assertIn('<operation>exposure</operation>', content)
+            # Verify hex exists
+            # 0.0, 0.5, 0.0 packed floats
+            # Check structure roughly
+            self.assertIn('<op_params>', content)
+        
+        # Cleanup
+        os.remove(style_path)
+
 if __name__ == '__main__':
     unittest.main()

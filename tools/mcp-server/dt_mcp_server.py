@@ -253,7 +253,46 @@ def generative_edit(args: dict = {}) -> str:
         else:
             results.append(f"Cancelled: {os.path.basename(path)} ({status})")
             
+        else:
+            results.append(f"Cancelled: {os.path.basename(path)} ({status})")
+            
     return "\n".join(results)
+
+@mcp.tool()
+def auto_develop(args: dict = {}) -> str:
+    """Analyzes image and applies AI Exposure correction style."""
+    resp = send_lua_command("get_selection", {})
+    if resp.get("status") != "ok": return "Error: " + resp.get("error")
+    
+    selection = resp.get("data", [])
+    if not selection: return "No images."
+    
+    count = 0
+    for img in selection:
+        path = img["path"]
+        img_id = img["id"]
+        
+        write_gui_status(f"Analyzing {os.path.basename(path)}...")
+        
+        # Analyze
+        bias = dt_cv_utils.analyze_exposure(path)
+        
+        # Generate Style (V2 Legacy format for safety)
+        style_path = dt_cv_utils.generate_dtstyle(bias, MCP_DIR)
+        
+        # Apply Logic
+        write_gui_status(f"Applying bias {bias:.2f} EV...")
+        
+        # Send command to Lua to import and apply
+        # Note: Lua's 'apply_style' command we added handles import
+        res = send_lua_command("apply_style", {"img_id": img_id, "style_path": style_path})
+        
+        if res.get("status") == "ok":
+            count += 1
+        else:
+            print(f"Failed to apply style: {res}")
+            
+    return f"Auto-Developed {count} images."
 
 
 import dt_cloud
@@ -290,7 +329,8 @@ def monitor_uploads():
         "auto_tag_selection": auto_tag_selection,
         "cull_selection": cull_selection,
         "generate_mask": generate_mask,
-        "generative_edit": generative_edit
+        "generative_edit": generative_edit,
+        "auto_develop": auto_develop
     }
     
     while True:

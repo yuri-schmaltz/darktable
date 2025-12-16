@@ -199,25 +199,27 @@ function commands.get_selection(args)
 end
 
 function commands.apply_style(args)
-
     local img_id = args.img_id
-    local style_name = args.style_name
+    local style_path = args.style_path
     local img = dt.database.get_image(img_id)
     
     if not img then error("Image not found: " .. img_id) end
     
-    local style = nil
-    for _, s in ipairs(dt.styles.get_list()) do
-        if s.name == style_name then
-            style = s
-            break
-        end
-    end
+    if not style_path then error("Style path required") end
+
+    -- Import style from file
+    -- dt.styles.import returns the style object
+    local style = dt.styles.import(style_path)
     
-    if not style then error("Style not found: " .. style_name) end
+    if not style then error("Failed to import style: " .. style_path) end
     
     dt.styles.apply(style, img)
-    return { success = true, id = img_id, style_applied = style_name }
+    
+    -- Cleanup? We might want to delete the temp style to avoid cluttering the database.
+    -- dt.styles.delete(style) -- checks if this API exists. 
+    -- For now, let's keep it or assumed unique name.
+    
+    return { success = true, id = img_id, style_applied = style.name }
 end
 
 
@@ -399,24 +401,29 @@ local function create_ai_panel()
     btn_gen_edit.label = "Generative Edit"
     btn_gen_edit.tooltip = "Open external editor to heal/remove objects"
 
+    local btn_auto = dt.new_widget("button")
+    btn_auto.label = "Auto Develop"
+    btn_auto.tooltip = "AI-based Exposure/Contrast adjustment"
+
     -- Layout
     widget[1] = label_tools
     widget[2] = btn_tag
     widget[3] = btn_cull
     widget[4] = btn_mask
     widget[5] = btn_gen_edit
-    widget[6] = dt.new_widget("label") -- Spacer
-    widget[6].label = " "
-    widget[7] = label_cloud
-    widget[8] = status_cloud
-    widget[9] = dt.new_widget("label") -- Spacer
-    widget[9].label = " "
-    widget[10] = label_settings
-    widget[11] = entry_remote
-    widget[12] = entry_sensitivity
+    widget[6] = btn_auto
+    widget[7] = dt.new_widget("label") -- Spacer
+    widget[7].label = " "
+    widget[8] = label_cloud
+    widget[9] = status_cloud
+    widget[10] = dt.new_widget("label") -- Spacer
+    widget[10].label = " "
+    widget[11] = label_settings
+    widget[12] = entry_remote
+    widget[13] = entry_sensitivity
     
     -- Re-assign refresh button index (shifted)
-    -- widget[13] will be assigned below
+    -- widget[14] will be assigned below
 
     -- Callbacks
     dt.register_event("mcp_btn_mask", "clicked", function(w)
@@ -466,6 +473,27 @@ local function create_ai_panel()
             dt.print("No images selected")
         end
     end, btn_gen_edit)
+
+    dt.register_event("mcp_btn_auto", "clicked", function(w)
+        local selection = dt.gui.selection()
+         if #selection > 0 then
+             local req = {
+                tool = "auto_develop",
+                args = {
+                    ai_sensitivity = entry_sensitivity.text
+                } 
+            }
+            local q = DT_MCP_DIR .. "/gui_request_" .. os.time() .. ".json"
+            local f = io.open(q, "w")
+            if f then
+                f:write(json.encode(req))
+                f:close()
+                status_cloud.label = "Auto-Develop requested..."
+            end
+        else
+            dt.print("No images selected")
+        end
+    end, btn_auto)
 
     -- Save Preferences Trigger (on leaving widget or explicit save?)
     -- Simple approach: Save when executing commands.
@@ -547,7 +575,7 @@ local function create_ai_panel()
         check_status()
     end, btn_refresh)
     
-    widget[13] = btn_refresh
+    widget[14] = btn_refresh
     
     -- Initial Check
     check_status()

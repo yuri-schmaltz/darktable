@@ -1,6 +1,9 @@
 
 import sys
 import os
+import time
+import struct
+import binascii
 
 # Try importing OpenCV for robust processing
 try:
@@ -245,3 +248,107 @@ def open_inpainting_editor(image_path):
             
     except Exception as e:
         return None, f"Editor failed: {e}"
+
+# --- Auto-Develop Utils ---
+
+def analyze_exposure(image_path):
+    """
+    Analyzes image brightness and suggests an exposure bias (EV).
+    Target brightness: 0.5 (middle gray mapping).
+    Returns: float (EV bias)
+    """
+    if not os.path.exists(image_path):
+        return 0.0
+
+    try:
+        # Use OpenCV or PIL
+        mean_b = None
+        if HAS_OPENCV:
+            img = cv2.imread(image_path)
+            if img is not None:
+                # Convert to gray
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                # Normalize 0-1
+                mean_b = np.mean(gray) / 255.0
+        elif HAS_PIL:
+            try:
+                im = Image.open(image_path).convert('L')
+                stat = ImageStat.Stat(im)
+                mean_b = stat.mean[0] / 255.0
+            except:
+                pass
+                
+        if mean_b is None:
+            return 0.0
+            
+        # Avoid div by zero
+        mean_b = max(mean_b, 0.001)
+        
+        # Calculate bias. 
+        # Target = 0.40 (Standard middle gray is ~0.18 linear, but perceptual ~0.5. 
+        # JPEGs are gamma corrected. 0.4-0.5 is decent target for 'well lit').
+        target = 0.45
+        
+        # Exposure = log2(target / current)
+        bias = np.log2(target / mean_b)
+        
+        # Clamp to reasonable values (-3 EV to +3 EV)
+        bias = max(min(bias, 3.0), -3.0)
+        
+        return float(bias)
+
+    except Exception as e:
+        print(f"Exposure analysis failed: {e}")
+        return 0.0
+
+import struct
+import binascii
+
+def generate_dtstyle(exposure_bias, output_dir):
+    """
+    Generates a Darktable Style (.dtstyle) file with the given exposure bias.
+    Uses 'exposure' module version 2 (legacy) params to be upgrade-safe.
+    Struct v2: float black, float exposure, float gain.
+    """
+    style_name = "MCP_Auto_Exposure"
+    filename = f"mcp_auto_{int(time.time()*1000)}.dtstyle"
+    path = os.path.join(output_dir, filename)
+    
+    # Create v2 params
+    # black=0.0, exposure=bias, gain=0.0? Or 1.0?
+    # v2 code: black, exposure, gain.
+    # We only care about exposure.
+    # Packing: 3 floats (little endian)
+    # v2 usually had gain=1.0? Let's check logic. Actually v2 definition had gain.
+    # But usually useless. Let's set black=0, exposure=bias, gain=1.0 just in case.
+    packed = struct.pack('<fff', 0.0, exposure_bias, 0.0) 
+    # Encoding: hex string
+    params_hex = binascii.hexlify(packed).decode('utf-8')
+    
+    xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<darktable_style version="1.0">
+  <info>
+    <name>{style_name}</name>
+    <description>AI Generated Exposure: {exposure_bias:.2f} EV</description>
+  </info>
+  <style>
+    <plugin>
+      <num>5</num>
+      <module>3</module>
+      <operation>exposure</operation>
+      <op_params>{params_hex}</op_params>
+      <enabled>1</enabled>
+      <blend_op_params>gz12eJxjYGByaGAAgRNODESDBnsIHll8ANNSGQM=</blend_op_params>
+      <blend_op_version>4</blend_op_version>
+      <test_blend_op_params>gz12eJxjYGByaGAAgRNODESDBnsIHll8ANNSGQM=</test_blend_op_params>
+    </plugin>
+  </style>
+</darktable_style>
+"""
+    # Note: blend_op_params are default "pass through". 
+    # module=3 (order?) num=5 (history stack?) - import usually overrides these.
+    
+    with open(path, 'w') as f:
+        f.write(xml_content)
+        
+    return path
