@@ -439,6 +439,35 @@ local function create_ai_panel()
         end
     end, btn_cull)
 
+    -- Status Checker
+    local function check_status()
+        local sfile = DT_MCP_DIR .. "/gui_status.json"
+        local f = io.open(sfile, "r")
+        if f then
+            local content = f:read("*all")
+            f:close()
+            local status = json.decode(content)
+            if status and status.message then
+                 status_cloud.label = status.message
+            end
+        else
+            status_cloud.label = "Server Offline (No Status)"
+        end
+    end
+
+    -- Refresh Button
+    local btn_refresh = dt.new_widget("button")
+    btn_refresh.label = "Refresh Status"
+    dt.register_event("mcp_btn_refresh", "clicked", function(w)
+        check_status()
+    end, btn_refresh)
+    
+    widget[7] = btn_refresh
+    
+    -- Initial Check
+    check_status()
+
+
     return widget
 end
 

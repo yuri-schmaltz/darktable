@@ -207,9 +207,29 @@ import glob
 import time
 
 
+
+STATUS_FILE = os.path.join(MCP_DIR, "gui_status.json")
+
+def write_gui_status(message: str, is_error: bool = False):
+    """Writes a status message for the Lua GUI to consume."""
+    try:
+        data = {
+            "message": message,
+            "error": is_error,
+            "timestamp": time.time()
+        }
+        # Atomic write
+        tmp = STATUS_FILE + ".tmp"
+        with open(tmp, 'w') as f:
+            json.dump(data, f)
+        os.rename(tmp, STATUS_FILE)
+    except Exception as e:
+        print(f"Failed to write GUI status: {e}")
+
 def monitor_uploads():
     """Background thread to monitor and process upload and GUI requests."""
     print("[Upload Monitor] Started monitoring for requests...")
+    write_gui_status("MCP Server Ready")
     
     # We map tool names from the GUI request to local functions
     TOOL_MAP = {
@@ -226,6 +246,7 @@ def monitor_uploads():
             for f in files_up:
                 if f.endswith(".tmp"): continue
                 try:
+                    write_gui_status("Starting upload...")
                     with open(f, 'r') as json_file:
                         data = json.load(json_file)
                     
@@ -234,10 +255,13 @@ def monitor_uploads():
                         print(f"[Upload Monitor] Uploading {os.path.basename(source)}...")
                         success, msg = dt_cloud.upload_file(source)
                         print(f"[Upload Monitor] Upload Result: {msg}")
+                        write_gui_status(f"Upload: {msg}", is_error=not success)
                     else:
                         print(f"[Upload Monitor] Invalid upload request: {source}")
+                        write_gui_status("Upload Error: File not found", is_error=True)
                 except Exception as e:
                     print(f"[Upload Monitor] Error processing upload {f}: {e}")
+                    write_gui_status(f"Upload Exception: {str(e)}", is_error=True)
                 
                 try:
                     os.remove(f)
@@ -257,26 +281,30 @@ def monitor_uploads():
                     args = req.get("args", {})
                     
                     print(f"[GUI Monitor] Detected request: {tool_name}")
+                    write_gui_status(f"Running {tool_name}...")
                     
                     if tool_name in TOOL_MAP:
                         # Execute the tool
-                        # Note: These tools currently take no args for selection, 
-                        # but might in future.
                         func = TOOL_MAP[tool_name]
                         result = func() # Capture output string
                         print(f"[GUI Monitor] Tool Output: {result}")
                         
-                        # TODO: Write back to a status file if we want the GUI label to update?
-                        # For now, just logging is enough as per plan.
+                        # Write success status
+                        # Truncate long results for UI label
+                        short_res = (result[:40] + '..') if len(result) > 40 else result
+                        write_gui_status(short_res)
                     else:
                         print(f"[GUI Monitor] Unknown tool: {tool_name}")
+                        write_gui_status(f"Unknown tool: {tool_name}", is_error=True)
                         
                 except Exception as e:
                     print(f"[GUI Monitor] Error processing GUI request {f}: {e}")
+                    write_gui_status(f"Error: {str(e)}", is_error=True)
                 
                 try:
                     os.remove(f)
                 except: pass
+
 
             time.sleep(1) # Poll interval
         except Exception as e:
