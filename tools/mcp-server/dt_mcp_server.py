@@ -127,11 +127,79 @@ def attach_tag(img_id: int, tag_name: str) -> str:
     result = send_lua_command("attach_tag", {"img_id": img_id, "tag_name": tag_name})
     return json.dumps(result)
 
+import dt_cv_utils
+
 @mcp.tool()
 def apply_style(img_id: int, style_name: str) -> str:
     """Apply a named style (preset) to an image."""
     result = send_lua_command("apply_style", {"img_id": img_id, "style_name": style_name})
     return json.dumps(result)
+
+@mcp.tool()
+def auto_tag_selection() -> str:
+    """Automatically analyzes selected images and adds descriptive tags."""
+    # 1. Get selection from Lua
+    resp = send_lua_command("get_selection", {})
+    if resp.get("status") != "ok":
+        return "Failed to get selection: " + resp.get("error", "Unknown error")
+    
+    selection = resp.get("data", [])
+    if not selection:
+        return "No images selected."
+
+    results = []
+    
+    # 2. Analyze and Tag
+    for img in selection:
+        img_id = img["id"]
+        path = img["path"]
+        
+        tags = dt_cv_utils.classify_image(path)
+        
+        for tag in tags:
+            send_lua_command("attach_tag", {"img_id": img_id, "tag_name": tag})
+        
+        results.append(f"Image {img['id']}: Added {', '.join(tags)}")
+        
+    return "\n".join(results)
+
+@mcp.tool()
+def cull_selection() -> str:
+    """Analyzes sharpness of selected images. Picks the best one (Green label) and rejects others (Red label)."""
+    # 1. Get selection
+    resp = send_lua_command("get_selection", {})
+    if resp.get("status") != "ok":
+         return "Failed to get selection: " + resp.get("error")
+         
+    selection = resp.get("data", [])
+    if not selection:
+        return "No images selected."
+        
+    if len(selection) < 2:
+        return "Select at least 2 images to compare."
+
+    # 2. Score images
+    scores = []
+    for img in selection:
+        score = dt_cv_utils.calculate_sharpness(img["path"])
+        scores.append((score, img))
+        
+    # 3. Sort by score desc
+    scores.sort(key=lambda x: x[0], reverse=True)
+    
+    best_img = scores[0][1]
+    best_score = scores[0][0]
+    
+    # 4. Apply labels
+    # Best -> Green (color: "green")
+    send_lua_command("set_color_label", {"img_id": best_img["id"], "color": "green"})
+    
+    # Others -> Red ("red")
+    for i in range(1, len(scores)):
+        img = scores[i][1]
+        send_lua_command("set_color_label", {"img_id": img["id"], "color": "red"})
+        
+    return f"Culled {len(selection)} images. Winner: {best_img['filename']} (Score: {best_score:.2f})"
 
 if __name__ == "__main__":
     mcp.run()

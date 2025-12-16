@@ -188,7 +188,18 @@ function commands.attach_tag(args)
     return { success = true, id = img_id, tag_attached = tag_name }
 end
 
+
+function commands.get_selection(args)
+    local selection = dt.gui.selection()
+    local result = {}
+    for _, img in ipairs(selection) do
+        table.insert(result, { id = img.id, path = img.path .. "/" .. img.filename, filename = img.filename })
+    end
+    return result
+end
+
 function commands.apply_style(args)
+
     local img_id = args.img_id
     local style_name = args.style_name
     local img = dt.database.get_image(img_id)
