@@ -306,4 +306,50 @@ end
 
 -- Start polling
 dt.register_event("mcp_poller", KEEP_ALIVE_INTERVAL, process_commands)
-log("MCP Bridge initialized and polling...")
+
+-- Storage Module for Cloud Sync
+dt.register_storage("mcp_cloud", "MCP Cloud Sync",
+    function(storage_params, image, format_params, filename)
+        -- Send command to Python server to upload the file
+        -- We construct a special command payload that the python server will recognize
+        -- Note: The bridge is for PULLING commands, but we need to PUSH an event/command.
+        -- Since our architecture is polling-based (Python writes to CMD, Lua writes to RESP),
+        -- Lua cannot easily "push" a command to Python unless Python is polling too.
+        
+        -- HACK: We will write to a separate "events.json" or simply log it for now?
+        -- ACTUALLY: The easiest way for now is to write to a specific 'upload_queue.json' 
+        -- and have the Python server watch it, OR just print to stdout and expect the user to see it?
+        
+        -- BETTER ARCHITECTURE:
+        -- The Python server should expose an endpoint or watch a file.
+        -- Let's write to "~/.config/darktable/mcp/upload_queue.json"
+        
+        local upload_req = {
+            source_file = filename,
+            target = "cloud",
+            img_id = image.id
+        }
+        
+        local queue_file = DT_MCP_DIR .. "/upload_queue.json.tmp"
+        local final_queue_file = DT_MCP_DIR .. "/upload_queue.json"
+        
+        -- Simple append is hard with JSON. We will just write one file per request for simplicity using UUID?
+        -- Or just overwrite for this POC (Risk of race condition if multiple exports at once).
+        -- Let's use a timestamped filename.
+        
+        local timestamp = os.time()
+        local unique_file = DT_MCP_DIR .. "/upload_" .. timestamp .. "_" .. image.id .. ".json"
+        
+        local f = io.open(unique_file, "w")
+        if f then
+            f:write(json.encode(upload_req))
+            f:close()
+            log("Queued upload: " .. unique_file)
+        else
+            log("Failed to write upload request")
+        end
+    end,
+    nil, -- finalize
+    nil, -- supported
+    nil  -- initialize
+)

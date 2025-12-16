@@ -201,5 +201,56 @@ def cull_selection() -> str:
         
     return f"Culled {len(selection)} images. Winner: {best_img['filename']} (Score: {best_score:.2f})"
 
+
+import dt_cloud
+import glob
+import time
+
+def monitor_uploads():
+    """Background thread to monitor and process upload requests."""
+    print("[Upload Monitor] Started monitoring for upload requests...")
+    while True:
+        try:
+            # Pattern matches upload requests
+            pattern = os.path.join(MCP_DIR, "upload_*.json")
+            files = glob.glob(pattern)
+            
+            for f in files:
+                # Double check extension to avoid .tmp
+                if f.endswith(".tmp"): continue
+                
+                try:
+                    with open(f, 'r') as json_file:
+                        data = json.load(json_file)
+                    
+                    source = data.get("source_file")
+                    target = data.get("target")
+                    
+                    if source and os.path.exists(source):
+                        print(f"[Upload Monitor] Processing {os.path.basename(source)}...")
+                        success, msg = dt_cloud.upload_file(source)
+                        print(f"[Upload Monitor] Result: {msg}")
+                    else:
+                        print(f"[Upload Monitor] Invalid request or file missing: {source}")
+                        
+                except Exception as e:
+                    print(f"[Upload Monitor] Error processing {f}: {e}")
+                
+                # Cleanup request file
+                try:
+                    os.remove(f)
+                except:
+                    pass
+                    
+            time.sleep(1) # Poll interval
+        except Exception as e:
+            print(f"[Upload Monitor] Fatal error: {e}")
+            time.sleep(5)
+
 if __name__ == "__main__":
+    # Start upload monitor in background
+    import threading
+    t = threading.Thread(target=monitor_uploads, daemon=True)
+    t.start()
+    
     mcp.run()
