@@ -203,6 +203,32 @@ def cull_selection(args: dict = {}) -> str:
     return f"Culled {len(selection)} images. Winner: {best_img['filename']} (Score: {best_score:.2f})"
 
 
+@mcp.tool()
+def generate_mask(args: dict = {}) -> str:
+    """Generates a foreground mask for selected images. Args: {'ai_sensitivity': 'Strict'|'Normal'}"""
+    # 1. Get selection
+    resp = send_lua_command("get_selection", {})
+    if resp.get("status") != "ok":
+         return "Failed to get selection: " + resp.get("error")
+         
+    selection = resp.get("data", [])
+    if not selection:
+        return "No images selected."
+
+    results = []
+    for img in selection:
+        path = img["path"]
+        write_gui_status(f"Generating mask for {os.path.basename(path)}...")
+        
+        mask_path, status = dt_cv_utils.generate_mask(path)
+        if mask_path:
+            results.append(f"Generated: {os.path.basename(mask_path)} ({status})")
+        else:
+            results.append(f"Failed: {os.path.basename(path)} ({status})")
+            
+    return "\n".join(results)
+
+
 import dt_cloud
 import glob
 import time
@@ -235,7 +261,8 @@ def monitor_uploads():
     # We map tool names from the GUI request to local functions
     TOOL_MAP = {
         "auto_tag_selection": auto_tag_selection,
-        "cull_selection": cull_selection
+        "cull_selection": cull_selection,
+        "generate_mask": generate_mask
     }
     
     while True:

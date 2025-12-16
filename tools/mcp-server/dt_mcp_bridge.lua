@@ -391,19 +391,60 @@ local function create_ai_panel()
     entry_sensitivity.text = dt.preferences.read("mcp", "ai_sensitivity", "string") or "Normal"
     entry_sensitivity.tooltip = "AI Sensitivity (Strict/Normal/Loose)"
 
+    local btn_mask = dt.new_widget("button")
+    btn_mask.label = "Generate Mask"
+    btn_mask.tooltip = "Generate a Raster Mask (PNG) for the subject"
+
     -- Layout
     widget[1] = label_tools
     widget[2] = btn_tag
     widget[3] = btn_cull
-    widget[4] = dt.new_widget("label") -- Spacer
-    widget[4].label = " "
-    widget[5] = label_cloud
-    widget[6] = status_cloud
-    widget[7] = dt.new_widget("label") -- Spacer
-    widget[7].label = " "
-    widget[8] = label_settings
-    widget[9] = entry_remote
-    widget[10] = entry_sensitivity
+    widget[4] = btn_mask
+    widget[5] = dt.new_widget("label") -- Spacer
+    widget[5].label = " "
+    widget[6] = label_cloud
+    widget[7] = status_cloud
+    widget[8] = dt.new_widget("label") -- Spacer
+    widget[8].label = " "
+    widget[9] = label_settings
+    widget[10] = entry_remote
+    widget[11] = entry_sensitivity
+    
+    -- Re-assign refresh button index (shifted by 1)
+    widget[12] = widget[11] -- (The refresh button was at 11 previously, but we need to find where it was defined or just reassign it if we have reference)
+    -- Actually, `create_ai_panel` function ends later. I should just insert it in the list.
+    -- To avoid index confusion, let's just use table.insert if it was a table, but it's a userdata 'box'.
+    -- The indices must be sequential? Lua widgets in boxes are usually added via table assignment.
+    -- Let's stick to explicit assignment as before. 
+    -- BUT wait, I need to check where `btn_refresh` is assigned. It was assigned to widget[11] in previous step!
+    -- So now it should be widget[12].
+
+    -- Callbacks
+    dt.register_event("mcp_btn_mask", "clicked", function(w)
+        local selection = dt.gui.selection()
+        
+        -- Save stats
+        dt.preferences.write("mcp", "cloud_remote", "string", entry_remote.text)
+        dt.preferences.write("mcp", "ai_sensitivity", "string", entry_sensitivity.text)
+
+        if #selection > 0 then
+             local req = {
+                tool = "generate_mask",
+                args = {
+                    ai_sensitivity = entry_sensitivity.text
+                } 
+            }
+            local q = DT_MCP_DIR .. "/gui_request_" .. os.time() .. ".json"
+            local f = io.open(q, "w")
+            if f then
+                f:write(json.encode(req))
+                f:close()
+                status_cloud.label = "Mask generation requested..."
+            end
+        else
+            dt.print("No images selected")
+        end
+    end, btn_mask)
 
     -- Save Preferences Trigger (on leaving widget or explicit save?)
     -- Simple approach: Save when executing commands.
@@ -485,7 +526,7 @@ local function create_ai_panel()
         check_status()
     end, btn_refresh)
     
-    widget[11] = btn_refresh
+    widget[12] = btn_refresh
     
     -- Initial Check
     check_status()
