@@ -1,0 +1,114 @@
+/*
+  Darktable Color Palette
+  Extracted from darktable.css for modularity.
+*/
+
+/*----------------------------------------------------------
+  - Perceptually uniform grey gradient on LCH color space. -
+  --------------------------------------------------------*/
+
+/* grey_00 = pure black is forbidden for visual assessment */
+@define-color grey_00 #000000;
+@define-color grey_05 #111111;
+@define-color grey_10 #1b1b1b;
+@define-color grey_15 #262626;
+@define-color grey_20 #303030;
+@define-color grey_25 #3b3b3b;
+@define-color grey_30 #474747;
+@define-color grey_35 #525252;
+@define-color grey_40 #5e5e5e;
+@define-color grey_45 #6a6a6a;
+@define-color grey_50 #777777;
+@define-color grey_55 #848484;
+@define-color grey_60 #919191;
+@define-color grey_65 #9e9e9e;
+@define-color grey_70 #ababab;
+@define-color grey_75 #b9b9b9;
+@define-color grey_80 #c6c6c6;
+@define-color grey_85 #d4d4d4;
+@define-color grey_90 #e2e2e2;
+@define-color grey_95 #f1f1f1;
+@define-color grey_100 #ffffff;
+/* grey_100 = pure white is forbidden for visual assessment */
+
+@define-color bauhaus_fg_selected @grey_80;
+@define-color bauhaus_fg_insensitive alpha(@fg_color, 0.4);
+
+/* GTK Buttons and tabs */
+@define-color button_bg @grey_25;
+@define-color button_fg alpha(@fg_color, 0.55);
+@define-color button_border shade(@button_bg, 1.04);
+@define-color button_hover_bg @grey_50;
+@define-color button_hover_fg @grey_15;
+
+/* text fields */
+@define-color field_bg @grey_15;
+@define-color field_fg @fg_color;
+@define-color field_active_bg @grey_25;
+@define-color field_active_fg @grey_80;
+@define-color field_selected_bg @grey_40;
+@define-color field_selected_fg @grey_85;
+@define-color field_hover_bg @grey_55;
+@define-color field_hover_fg @grey_95;
+
+/* Tooltips and contextual helpers */
+@define-color tooltip_bg_color @grey_15;
+@define-color tooltip_fg_color @grey_65;
+@define-color really_dark_bg_color @grey_05;
+@define-color log_fg_color @grey_85;
+
+/* Views */
+@define-color darkroom_bg_color @grey_50;    /* this need to be middle grey to correctly work on images. And for all themes */
+@define-color darkroom_preview_bg_color @darkroom_bg_color;
+@define-color lighttable_bg_color @grey_40;
+@define-color lighttable_preview_bg_color @darkroom_bg_color;
+@define-color lighttable_bg_font_color @grey_75;
+@define-color print_bg_color @lighttable_bg_color;
+
+/* Lighttable and film-strip */
+@define-color thumbnail_font_color @grey_30;
+@define-color thumbnail_bg_color @grey_50;
+@define-color thumbnail_star_bg_color @grey_35;
+@define-color thumbnail_star_hover_color @grey_80;
+@define-color thumbnail_localcopy @grey_95;
+@define-color thumbnail_fg_color @grey_55;
+@define-color thumbnail_bg50_color @grey_95;
+@define-color thumbnail_selected_bg_color @grey_70;
+@define-color thumbnail_hover_bg_color @grey_85;
+@define-color thumbnail_hover_fg_color @grey_90;
+@define-color filmstrip_bg_color @lighttable_bg_color;
+@define-color timeline_bg_color shade(@lighttable_bg_color, 0.9);
+@define-color timeline_fg_color @text_color;
+@define-color timeline_text_bg_color alpha(black, .8);
+@define-color timeline_text_fg_color alpha(white, .9);
+
+@define-color range_graph_color alpha(@timeline_fg_color, 0.75);
+@define-color range_bg_color alpha(@fg_color, 0.12);
+@define-color range_cursor_color alpha(@fg_color, 0.75);
+@define-color range_sel_color alpha(@bauhaus_fill, 0.6);
+@define-color range_icon_color alpha(@thumbnail_hover_fg_color, 0.35);
+
+/* Brushes */
+@define-color brush_cursor alpha(white, .9);
+@define-color brush_trace alpha(black, .6);
+
+/* Graphs : histogram, navigation thumbnail and some items on tone curve */
+@define-color graph_bg @grey_15;
+@define-color graph_exterior shade(@graph_bg, 0.9);
+@define-color graph_border @grey_05;
+@define-color graph_fg @grey_75;
+@define-color graph_fg_active @grey_95;
+@define-color graph_grid @grey_05;
+@define-color graph_overlay @grey_50;
+@define-color inset_histogram alpha(@grey_65, 0.50);
+
+/* Primaries */
+@define-color graph_red rgb(237,30,20);
+@define-color graph_green rgb(28,235,26);
+@define-color graph_blue rgb(14,14,233);
+
+@define-color colorlabel_red rgb(230,0,0);
+@define-color colorlabel_green rgb(0,230,0);
+@define-color colorlabel_blue rgb(40,140,255);
+@define-color colorlabel_yellow rgb(255,180,0);
+@define-color colorlabel_purple rgb(230,0,230);
