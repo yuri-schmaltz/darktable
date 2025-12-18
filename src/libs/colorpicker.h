@@ -20,6 +20,7 @@
 
 #include <gtk/gtk.h>
 #include <inttypes.h>
+#include "common/dttypes.h"
 
 typedef enum dt_lib_colorpicker_size_t
 {

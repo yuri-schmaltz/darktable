@@ -55,7 +55,7 @@ const char *name(dt_lib_module_t *self) { return _("viewswitcher"); }
 dt_view_type_flags_t views(dt_lib_module_t *self) { return DT_VIEW_ALL; }
 
 uint32_t container(dt_lib_module_t *self) {
-  return DT_UI_CONTAINER_PANEL_TOP_RIGHT;
+  return DT_UI_CONTAINER_PANEL_TOP_CENTER;
 }
 
 int expandable(dt_lib_module_t *self) { return 0; }
@@ -66,17 +66,16 @@ int position(const dt_lib_module_t *self) { return 1001; }
   dt_action_define(&darktable.control->actions_global, "switch views",         \
                    v->module_name, w, NULL);
 
-static void _dropdown_changed(GtkComboBox *widget, dt_lib_viewswitcher_t *d) {
-  // Removed
-}
-
 void gui_init(dt_lib_module_t *self) {
   /* initialize ui widgets */
   dt_lib_viewswitcher_t *d = g_malloc0(sizeof(dt_lib_viewswitcher_t));
   self->data = (void *)d;
 
   self->widget = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-  // d->dropdown = NULL; // Removed
+
+  // Create an inner box to hold the buttons, which will be centered
+  GtkWidget *inner_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+  gtk_box_set_center_widget(GTK_BOX(self->widget), inner_box);
 
   const gboolean gimping = dt_check_gimpmode("file");
   for (GList *view_iter = darktable.view_manager->views; view_iter;
@@ -91,20 +90,16 @@ void gui_init(dt_lib_module_t *self) {
     const gboolean darkroom = !g_strcmp0(view->module_name, "darkroom");
 
     GtkWidget *w = _lib_viewswitcher_create_label(view);
-    gtk_box_pack_start(GTK_BOX(self->widget), w, FALSE, FALSE, 0);
+    // Pack into inner_box instead of self->widget
+    gtk_box_pack_start(GTK_BOX(inner_box), w, FALSE, FALSE, 0);
     d->labels = g_list_append(d->labels, gtk_bin_get_child(GTK_BIN(w)));
 
     if (lighttable)
       gtk_widget_set_sensitive(w, !gimping);
     else if (darkroom)
-      gtk_widget_set_sensitive(
-          w, TRUE); // Darkroom always active? Original code said !(lighttable
-                    // && gimping) which is weird if lighttable is checked.
-    // Original: gtk_widget_set_sensitive(w, !(lighttable && gimping));
-    // If view is lighttable: disable if gimping.
-    // If view is darkroom: ! (false && gimping) -> true.
+      gtk_widget_set_sensitive(w, TRUE);
     else
-      gtk_widget_set_sensitive(w, !gimping); // Other views disabled if gimping
+      gtk_widget_set_sensitive(w, !gimping);
 
     SHORTCUT_TOOLTIP(view, w);
 
@@ -113,7 +108,8 @@ void gui_init(dt_lib_module_t *self) {
       GtkWidget *sep = gtk_label_new("|");
       gtk_widget_set_halign(sep, GTK_ALIGN_START);
       gtk_widget_set_name(sep, "view-label");
-      gtk_box_pack_start(GTK_BOX(self->widget), sep, FALSE, FALSE, 0);
+      // Pack separator into inner_box
+      gtk_box_pack_start(GTK_BOX(inner_box), sep, FALSE, FALSE, 0);
     }
   }
 

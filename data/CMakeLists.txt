@@ -30,6 +30,10 @@ if(USE_LUA)
 FILE(COPY lua luarc DESTINATION "${DARKTABLE_DATADIR}")
 install(DIRECTORY "lua" DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/darktable COMPONENT DTApplication)
 install(FILES luarc DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/darktable COMPONENT DTApplication)
+
+  # Install MCP AI Assistant
+  install(FILES ${CMAKE_SOURCE_DIR}/tools/mcp-server/dt_mcp_bridge.lua DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/darktable/lua COMPONENT DTApplication)
+  install(DIRECTORY ${CMAKE_SOURCE_DIR}/tools/mcp-server/ DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/darktable/mcp COMPONENT DTApplication PATTERN "install.sh" EXCLUDE)
 endif(USE_LUA)
 
 #
