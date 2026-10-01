@@ -493,7 +493,31 @@ gboolean try_enter(dt_view_t *self)
   /* verify that camera supports tethering and is available */
   if(dt_camctl_can_enter_tether_mode(darktable.camctl, NULL)) return FALSE;
 
-  dt_control_log(_("no camera with tethering support available for use..."));
+  /* This single message used to cover three genuinely different situations,
+   * and for two of them it was wrong: a camera that gphoto2 drives fine but
+   * that was dropped during initialisation, or one that cannot tether over
+   * the transport it is using, both produced "no camera ... available".
+   * See the design doc, sections 3.2 and 3.5. */
+  const char *reason = dt_camctl_unusable_reason(darktable.camctl);
+  const char *model = dt_camctl_unusable_model(darktable.camctl);
+
+  if(reason)
+  {
+    if(model)
+      dt_control_log(_("camera `%s' was found but cannot be used: %s"), model, reason);
+    else
+      dt_control_log(_("a camera was found but cannot be used: %s"), reason);
+  }
+  else if(dt_camctl_have_cameras(darktable.camctl))
+  {
+    dt_control_log(_("a camera is connected, but it cannot be used for tethering on "
+                     "the current connection (some cameras only support capture over "
+                     "their vendor protocol, not PTP)"));
+  }
+  else
+  {
+    dt_control_log(_("no camera with tethering support available for use..."));
+  }
   return TRUE;
 }
 

@@ -41,3 +41,23 @@ add_cmocka_test(test_hdr_alignment_internal
 if(WIN32)
     _copy_required_library(test_hdr_alignment_internal lib_darktable)
 endif(WIN32)
+
+# Tethering hardening: locale guard + camera detection regression tests.
+# These two are deliberately NOT cmocka tests and do not link lib_darktable.
+# They exercise the decision logic in isolation - the locale guard is a
+# self-contained static helper, and the detection path is driven through
+# fakes for the gphoto2 abilities list - so they build and run in a minimal
+# container that has neither a camera nor the full darktable runtime. That
+# is the point: a tethered developer should be able to prove the guard is
+# thread-local without a camera on the desk.
+#
+# T4/T5 in test_locale_guard self-report SKIP when only the C locale is
+# installed, because thread-local and process-global behaviour are then
+# indistinguishable and a pass would claim a verification that did not
+# happen.
+add_executable(test_locale_guard test_locale_guard.c)
+target_link_libraries(test_locale_guard PRIVATE Threads::Threads)
+add_test(NAME test_locale_guard COMMAND test_locale_guard)
+
+add_executable(test_camera_detection test_camera_detection.c)
+add_test(NAME test_camera_detection COMMAND test_camera_detection)

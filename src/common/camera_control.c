@@ -132,6 +132,91 @@ static void _camera_process_job(const dt_camctl_t *c,
                                 const dt_camera_t *camera,
                                 gpointer job);
 
+/* Run libgphoto2 under the C locale.
+ *
+ * gp_camera_get_config() smashes the stack in some locales (libgphoto2
+ * 2.5.31, seen with Ukrainian and Czech), and gphoto2's number
+ * formatting/parsing of camera properties is locale-sensitive - under a
+ * comma-decimal locale a property reported as 0 fails to parse, which is how
+ * #21445 made tethering refuse to start on a working camera.
+ *
+ * On POSIX we use newlocale()/uselocale(), which bind the C locale to the
+ * calling *thread* only. That is safe against the pixelpipe workers and the
+ * "tethering" event thread with no lock at all.
+ *
+ * On Windows there is no newlocale/uselocale, so we fall back to
+ * setlocale(LC_ALL, ...) under _configthreadlocale(). That path is
+ * process-global and is the weakest of the three locale sites in src/; it is
+ * kept exactly as it was rather than reworked here. See the design doc,
+ * section 5.
+ */
+
+#if defined(WIN32)
+typedef struct dt_camera_locale_guard_t
+{
+  char *saved;
+  int active;
+} dt_camera_locale_guard_t;
+#define DT_CAMERA_LOCALE_GUARD_INIT                                                              \
+  {                                                                                              \
+    NULL, 0                                                                                      \
+  }
+#else
+typedef struct dt_camera_locale_guard_t
+{
+  locale_t c_locale;
+  locale_t saved;
+  int active;
+} dt_camera_locale_guard_t;
+#define DT_CAMERA_LOCALE_GUARD_INIT                                                              \
+  {                                                                                              \
+    (locale_t) 0, (locale_t) 0, 0                                                                \
+  }
+#endif
+
+static void _camctl_locale_guard_begin(dt_camera_locale_guard_t *guard)
+{
+  memset(guard, 0, sizeof(*guard));
+#if defined(WIN32)
+  guard->saved = g_strdup(setlocale(LC_ALL, NULL));
+  _configthreadlocale(_ENABLE_PER_THREAD_LOCALE);
+  setlocale(LC_ALL, "C");
+  guard->active = 1;
+#else
+  guard->c_locale = newlocale(LC_ALL_MASK, "C", (locale_t) 0);
+  if(guard->c_locale == (locale_t) 0)
+  {
+    dt_print(DT_DEBUG_CAMCTL, "[camera_control] newlocale(LC_ALL_MASK, \"C\") failed");
+    return;
+  }
+  guard->saved = uselocale(guard->c_locale);
+  guard->active = 1;
+#endif
+}
+
+static void _camctl_locale_guard_end(dt_camera_locale_guard_t *guard)
+{
+  if(!guard->active)
+    return;
+#if defined(WIN32)
+  if(guard->saved)
+  {
+    setlocale(LC_ALL, guard->saved);
+    g_free(guard->saved);
+    guard->saved = NULL;
+  }
+  _configthreadlocale(_DISABLE_PER_THREAD_LOCALE);
+#else
+  if(guard->c_locale != (locale_t) 0)
+  {
+    uselocale(guard->saved);
+    freelocale(guard->c_locale);
+    guard->c_locale = (locale_t) 0;
+  }
+#endif
+  guard->active = 0;
+}
+
 /** Dispatch functions for listener interfaces */
 static const char *_dispatch_request_image_path(const dt_camctl_t *c,
                                                 const dt_image_basic_exif_t *basic_exif,
@@ -297,6 +382,14 @@ static void _camera_process_job(const dt_camctl_t *c,
 {
   dt_camera_t *cam = (dt_camera_t *)camera;
   _camctl_camera_job_t *j = (_camctl_camera_job_t *)job;
+  // This runs on the "tethering" event thread and is where property values are
+  // written back to the camera (gp_camera_set_single_config) and read
+  // (gp_widget_set_value / gp_widget_count_choices). Those paths format and
+  // parse numbers using the current locale, which is how a comma-decimal locale
+  // can make a legitimate property value fail - #21445. The whole dispatch is
+  // guarded so that no job type can be added without the guard.
+  dt_camera_locale_guard_t guard = DT_CAMERA_LOCALE_GUARD_INIT;
+  _camctl_locale_guard_begin(&guard);
   switch(j->type)
   {
 
@@ -559,6 +652,7 @@ static void _camera_process_job(const dt_camctl_t *c,
                "[camera_control] process of unknown job type 0x%x", j->type);
       break;
   }
+  _camctl_locale_guard_end(&guard);
 
   g_free(j);
 }
@@ -735,6 +829,7 @@ static void _camctl_camera_destroy_struct(dt_camera_t *cam)
   }
   g_free(cam->model);
   g_free(cam->port);
+  g_free(cam->unusable_reason);
   dt_pthread_mutex_destroy(&cam->jobqueue_lock);
   dt_pthread_mutex_destroy(&cam->config_lock);
   dt_pthread_mutex_destroy(&cam->live_view_buffer_mutex);
@@ -787,6 +882,8 @@ void dt_camctl_destroy(dt_camctl_t *camctl)
   gp_context_unref(camctl->gpcontext);
   gp_abilities_list_free(camctl->gpcams);
   gp_port_info_list_free(camctl->gpports);
+  g_free(camctl->unusable_reason);
+  g_free(camctl->unusable_model);
   dt_pthread_mutex_destroy(&camctl->lock);
   dt_pthread_mutex_destroy(&camctl->listeners_lock);
   g_free(camctl);
@@ -796,6 +893,16 @@ void dt_camctl_destroy(dt_camctl_t *camctl)
 gboolean dt_camctl_have_cameras(const dt_camctl_t *c)
 {
   return (c->cameras) ? TRUE : FALSE;
+}
+
+const char *dt_camctl_unusable_reason(const dt_camctl_t *c)
+{
+  return (c && c->unusable_reason) ? c->unusable_reason : NULL;
+}
+
+const char *dt_camctl_unusable_model(const dt_camctl_t *c)
+{
+  return (c && c->unusable_model) ? c->unusable_model : NULL;
 }
 
 gboolean dt_camctl_have_unused_cameras(const dt_camctl_t *c)
@@ -953,14 +1060,37 @@ static gboolean _camctl_update_cameras(const dt_camctl_t *c)
 
           if(_camera_initialize(camctl, camera) == FALSE)
           {
-            dt_print(DT_DEBUG_CAMCTL,
-                     "[camera_control] failed to initialize %s on port %s, likely "
-                     "causes are: locked by another application, no access to udev etc",
-                     camera->model, camera->port);
-            dt_control_log
-              (_("failed to initialize `%s' on port `%s', likely "
-                 "causes are: locked by another application, no access to devices etc"),
-               camera->model, camera->port);
+            // The generic "locked by another application / no access to udev"
+            // guess used to be the only thing shown, even when initialisation
+            // had already recorded the real cause. Keep both: the specific
+            // reason when we have one, the generic advice when we do not.
+            const char *reason = camera->unusable_reason;
+            if(reason)
+            {
+              dt_print(DT_DEBUG_CAMCTL,
+                       "[camera_control] cannot use %s on port %s: %s", camera->model,
+                       camera->port, reason);
+              dt_control_log(_("camera `%s' on port `%s' cannot be used: %s"),
+                             camera->model, camera->port, reason);
+              // Remember it so the tethering view can explain an empty camera
+              // list instead of claiming there is no camera at all.
+              g_free(camctl->unusable_reason);
+              g_free(camctl->unusable_model);
+              camctl->unusable_reason = g_strdup(reason);
+              camctl->unusable_model = g_strdup(camera->model);
+            }
+            else
+            {
+              dt_print(DT_DEBUG_CAMCTL,
+                       "[camera_control] failed to initialize %s on port %s, likely "
+                       "causes are: locked by another application, no access to udev etc",
+                       camera->model, camera->port);
+              dt_control_log
+                (_("failed to initialize `%s' on port `%s', likely "
+                   "causes are: locked by another application, no access to devices etc"),
+                 camera->model, camera->port);
+            }
+            g_free(camera->unusable_reason);
             g_free(camera);
             cam->used = TRUE;
             continue;
@@ -974,6 +1104,7 @@ static gboolean _camctl_update_cameras(const dt_camctl_t *c)
             dt_control_log(_("`%s' on port `%s' is not interesting"
                              " because it supports neither tethering nor import"),
                                camera->model, camera->port);
+            g_free(camera->unusable_reason);
             g_free(camera);
             cam->boring = TRUE;
             continue;
@@ -989,6 +1120,13 @@ static gboolean _camctl_update_cameras(const dt_camctl_t *c)
           // Add to camera list
           camctl->cameras = g_list_append(camctl->cameras, camera);
           camctl->changed_camera = TRUE;
+          // A camera is now usable, so any reason recorded by a previous
+          // detection round is stale. Leaving it set would make the tethering
+          // view report a stale problem while a working camera is plugged in.
+          g_free(camctl->unusable_reason);
+          g_free(camctl->unusable_model);
+          camctl->unusable_reason = NULL;
+          camctl->unusable_model = NULL;
 
           dt_print(DT_DEBUG_CAMCTL,
                    "[camera_control] remove %s on port %s from"
@@ -1137,14 +1275,32 @@ static gboolean _camera_initialize(const dt_camctl_t *c,
   {
     gp_camera_new(&cam->gpcam);
     int m = gp_abilities_list_lookup_model(c->gpcams, cam->model);
+    // The abilities list is keyed on the model *string* gphoto2 reported. A
+    // lookup miss - decorated names, firmware suffixes, PTP variants - is not
+    // the same failure as gphoto2 refusing to hand over the abilities, and the
+    // two used to be indistinguishable: the uncaught negative index went
+    // straight into gp_abilities_list_get_abilities(), the camera was dropped
+    // from the list, and the user was told no camera was present. See the
+    // design doc, section 3.5.
+    if(m < 0)
+     {
+      dt_print(DT_DEBUG_CAMCTL,
+               "[camera_control] no abilities entry for model '%s' (lookup=%d) on port %s",
+               cam->model, m, cam->port);
+      cam->unusable_reason =
+        g_strdup(_("model not found in the gphoto2 abilities list"));
+      return FALSE;
+     }
     int err = gp_abilities_list_get_abilities(c->gpcams, m, &a);
     if(err != GP_OK)
      {
       dt_print(DT_DEBUG_CAMCTL,
                "[camera_control] failed to gp_abilities_list_get_abilities %s",
                cam->model);
+      cam->unusable_reason =
+        g_strdup(_("gphoto2 could not report the capabilities of this model"));
       return FALSE;
-    }
+     }
 
     err = gp_camera_set_abilities(cam->gpcam, a);
     if(err != GP_OK)
@@ -1152,8 +1308,10 @@ static gboolean _camera_initialize(const dt_camctl_t *c,
       dt_print(DT_DEBUG_CAMCTL,
                "[camera_control] failed to gp_camera_set_abilities %s",
                cam->model);
+      cam->unusable_reason =
+        g_strdup(_("gphoto2 rejected the capabilities of this model"));
       return FALSE;
-    }
+     }
 
     int p = gp_port_info_list_lookup_path(c->gpports, cam->port);
     err = gp_port_info_list_get_info(c->gpports, p, &pi);
@@ -1206,28 +1364,17 @@ static gboolean _camera_initialize(const dt_camctl_t *c,
     // functions (newlocale/uselocale), or this locale switching should
     // be for the current thread only (on Windows where there is no
     // implementation of newlocale/uselocale).
-#if defined(WIN32)
-    char *locale = strdup(setlocale(LC_ALL, NULL));
-    _configthreadlocale(_ENABLE_PER_THREAD_LOCALE);
-    setlocale(LC_ALL, "C");
-#else
-    locale_t nlocale = newlocale(LC_ALL_MASK, "C", (locale_t) 0);
-    locale_t locale = uselocale(nlocale);
-#endif
+    //
+    // This now goes through _camctl_locale_guard_*() so that the very same
+    // reviewed implementation is applied to every gphoto2 call on the
+    // tethering event thread too. It used to be inline here only, which left
+    // every property read during a tether session running under the user's
+    // locale - the mechanism behind #21445.
+    dt_camera_locale_guard_t guard = DT_CAMERA_LOCALE_GUARD_INIT;
+    _camctl_locale_guard_begin(&guard);
     // read a full copy of config to configuration cache
     gp_camera_get_config(cam->gpcam, &cam->configuration, c->gpcontext);
-
-#if defined(WIN32)
-    if(locale)
-    {
-      setlocale(LC_ALL, locale);
-      free(locale);
-    }
-    _configthreadlocale(_DISABLE_PER_THREAD_LOCALE);
-#else
-    uselocale(locale);
-    freelocale(nlocale);
-#endif
+    _camctl_locale_guard_end(&guard);
 
     // TODO: find a more robust way for this, once we find out how to do it with non-EOS cameras
     cam->can_live_view_advanced =
@@ -2085,8 +2232,19 @@ static void _camera_poll_events(const dt_camctl_t *c,
 {
   CameraEventType event;
   gpointer data;
+  // The blocking wait is deliberately OUTSIDE the locale guard. On Windows the
+  // guard falls back to a process-global setlocale(); holding "C" for the full
+  // 30s timeout would reformat numbers across the whole GUI. On POSIX the guard
+  // is per-thread and would be harmless, but keeping one code path for both
+  // platforms is worth more than the symmetry.
   if(gp_camera_wait_for_event(cam->gpcam, 30, &event, &data, c->gpcontext) == GP_OK)
   {
+    // Everything below talks to gphoto2, and these paths format and parse
+    // locale-sensitively. Guarding the whole handler is both cheaper and safer
+    // than wrapping call sites: the next change cannot forget it.
+    dt_camera_locale_guard_t guard = DT_CAMERA_LOCALE_GUARD_INIT;
+    _camctl_locale_guard_begin(&guard);
+    {
     if(event == GP_EVENT_UNKNOWN)
     {
       /* this is really some undefined behavior, seems like it's
@@ -2180,6 +2338,8 @@ static void _camera_poll_events(const dt_camctl_t *c,
         g_free(output);
       }
     }
+    }
+    _camctl_locale_guard_end(&guard);
   }
 }
 

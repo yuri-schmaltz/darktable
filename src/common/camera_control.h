@@ -44,6 +44,11 @@ typedef struct dt_camera_t
   /** Camera configuration cache */
   CameraWidget *configuration;
 
+  /** Why this camera cannot be used, or NULL if it can. Set during
+   *  initialisation failure. Owned string, may be translated. \see
+   *  dt_camctl_unusable_reason() */
+  char *unusable_reason;
+
   /** Registered timeout func */
   CameraTimeoutFunc timeout;
 
@@ -189,6 +194,15 @@ typedef struct dt_camctl_t
 
   const dt_camera_t *active_camera;
 
+  /** Set when a camera was detected but dropped during initialisation, so
+   *  the UI can say *why* there is nothing to tether instead of claiming no
+   *  camera was found. Owned string, may be translated. Cleared whenever
+   *  detection succeeds. \see dt_camctl_unusable_reason() */
+  char *unusable_reason;
+  /** Model string of the camera described by unusable_reason, for the log.
+   *  Owned. May be NULL. */
+  char *unusable_model;
+
   gboolean import_ui;
   gboolean changed_camera;
   int ticker;
@@ -288,6 +302,17 @@ gboolean dt_camctl_have_unused_cameras(const dt_camctl_t *c);
 void dt_camctl_select_camera(const dt_camctl_t *c, const dt_camera_t *cam);
 /** Can tether...*/
 int dt_camctl_can_enter_tether_mode(const dt_camctl_t *c, const dt_camera_t *cam);
+
+/** Why the most recent camera detection produced no usable camera, or NULL
+ *  if the last detection succeeded or none has failed yet. Lets the UI say
+ *  "your camera was found but cannot be used because X" instead of "no
+ *  camera", which was actively misleading. Owned by the camctl, valid until
+ *  the next detection. May be translated. \see
+ *  dt_camctl_camera_unusable_reason() */
+const char *dt_camctl_unusable_reason(const dt_camctl_t *c);
+
+/** Model name that dt_camctl_unusable_reason() refers to, or NULL. */
+const char *dt_camctl_unusable_model(const dt_camctl_t *c);
 /** Enables/Disables the tether mode on camera. */
 void dt_camctl_tether_mode(const dt_camctl_t *c, const dt_camera_t *cam, gboolean enable);
 /** Imports the images in list from specified camera */
