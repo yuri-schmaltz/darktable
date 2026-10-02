@@ -81,3 +81,11 @@ target_link_libraries(test_cli_results_emit PRIVATE glib-2.0)
 add_test(NAME test_cli_results_json
          COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_cli_results_json.sh)
 set_tests_properties(test_cli_results_json PROPERTIES DEPENDS test_cli_results_emit)
+
+# Versioned request layer and the determinism contract. No JSON, no library, no
+# camera: the contract is plain C precisely so that it can be checked without
+# an archive and a decade.
+add_executable(test_cli_request test_cli_request.c ${CMAKE_CURRENT_SOURCE_DIR}/../../cli/request.c)
+target_include_directories(test_cli_request PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../cli)
+target_link_libraries(test_cli_request PRIVATE glib-2.0 m)
+add_test(NAME test_cli_request COMMAND test_cli_request)
