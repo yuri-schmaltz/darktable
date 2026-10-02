@@ -116,11 +116,33 @@ static void _view_capture_filmstrip_activate_callback(gpointer instance,
   dt_view_t *self = (dt_view_t *)user_data;
   dt_capture_t *lib = (dt_capture_t *)self->data;
 
+  /* #20102: the capture filmstrip fills up but nothing can be selected with the
+   * mouse or the keyboard. Two candidate causes that look identical from the
+   * outside: this callback never fires, or it fires with an imgid that fails
+   * dt_is_valid_imgid() and every effect below is silently skipped. This log
+   * tells the two apart on the reporter's machine - count the lines.
+   *
+   * Note that lib->image_id is assigned *before* the validity check, so an
+   * invalid activation still mutates the state that
+   * _capture_view_get_selected_imgid() hands to the rest of the app.
+   *
+   * Enable with -d camctl on the command line. */
+  dt_print(DT_DEBUG_CAMCTL,
+           "[tethering] filmstrip activate: imgid=%d valid=%d thread=%lu",
+           (int)imgid, dt_is_valid_imgid(imgid) ? 1 : 0, (unsigned long)pthread_self());
+
   lib->image_id = imgid;
   dt_view_active_images_reset(FALSE);
   dt_view_active_images_add(lib->image_id, TRUE);
 
-  if(dt_is_valid_imgid(imgid))
+  if(!dt_is_valid_imgid(imgid))
+  {
+    dt_print(DT_DEBUG_CAMCTL,
+             "[tethering] filmstrip activate ignored: invalid imgid %d "
+             "(this is the #20102 failure mode)", (int)imgid);
+    return;
+  }
+
   {
     dt_collection_memory_update();
     dt_selection_select_single(darktable.selection, imgid);
@@ -570,6 +592,17 @@ static void _camera_capture_image_downloaded(const dt_camera_t *camera,
                                              void *data)
 {
   dt_capture_t *lib = (dt_capture_t *)data;
+
+  /* #20102: pair this with the filmstrip activate line. If the download lines
+   * appear and the activate lines do not, the filmstrip is being populated but
+   * the activate signal is not reaching the view - which is the case where a
+   * threading fix would be the wrong answer. Compare the thread ids too: the
+   * download runs on the "tethering" event thread, the activate callback on
+   * whichever thread the thumb table signals from.
+   * Enable with -d camctl on the command line. */
+  dt_print(DT_DEBUG_CAMCTL,
+           "[tethering] image downloaded: %s thread=%lu", filename,
+           (unsigned long)pthread_self());
 
   /* create an import job of downloaded image */
   dt_control_add_job(DT_JOB_QUEUE_USER_BG,
