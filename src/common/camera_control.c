@@ -376,20 +376,16 @@ static gpointer _camera_get_job(const dt_camctl_t *c,
 }
 
 
-static void _camera_process_job(const dt_camctl_t *c,
-                                const dt_camera_t *camera,
-                                gpointer job)
+/* Process one camera job.
+ *
+ * Split out of _camera_process_job() for the same reason as
+ * _camera_handle_event(): the switch body has a return, and a return from
+ * inside a guarded region would skip _camctl_locale_guard_end(). */
+static void _camera_run_job(const dt_camctl_t *c, const dt_camera_t *camera,
+                            gpointer job)
 {
   dt_camera_t *cam = (dt_camera_t *)camera;
   _camctl_camera_job_t *j = (_camctl_camera_job_t *)job;
-  // This runs on the "tethering" event thread and is where property values are
-  // written back to the camera (gp_camera_set_single_config) and read
-  // (gp_widget_set_value / gp_widget_count_choices). Those paths format and
-  // parse numbers using the current locale, which is how a comma-decimal locale
-  // can make a legitimate property value fail - #21445. The whole dispatch is
-  // guarded so that no job type can be added without the guard.
-  dt_camera_locale_guard_t guard = DT_CAMERA_LOCALE_GUARD_INIT;
-  _camctl_locale_guard_begin(&guard);
   switch(j->type)
   {
 
@@ -652,9 +648,23 @@ static void _camera_process_job(const dt_camctl_t *c,
                "[camera_control] process of unknown job type 0x%x", j->type);
       break;
   }
+}
+static void _camera_process_job(const dt_camctl_t *c,
+                                const dt_camera_t *camera,
+                                gpointer job)
+{
+  // This runs on the "tethering" event thread and is where property values are
+  // written back to the camera (gp_camera_set_single_config) and read
+  // (gp_widget_set_value / gp_widget_count_choices). Those paths format and
+  // parse numbers using the current locale, which is how a comma-decimal
+  // locale can make a legitimate property value fail - #21445. The whole
+  // dispatch is guarded so no job type can be added without the guard.
+  dt_camera_locale_guard_t guard = DT_CAMERA_LOCALE_GUARD_INIT;
+  _camctl_locale_guard_begin(&guard);
+  _camera_run_job(c, camera, job);
   _camctl_locale_guard_end(&guard);
 
-  g_free(j);
+  g_free(job);
 }
 
 /*************/
@@ -2227,24 +2237,17 @@ void dt_camctl_camera_capture(const dt_camctl_t *c,
   _camera_add_job(camctl, camera, job);
 }
 
-static void _camera_poll_events(const dt_camctl_t *c,
-                                const dt_camera_t *cam)
+/* Handle one gphoto2 event.
+ *
+ * Split out of _camera_poll_events() so the locale guard's begin/end stay
+ * lexically adjacent in the caller. The body below has an early return, and a
+ * return from inside a guarded region skips the matching end - which was a real
+ * leak in the first version of this patch: on POSIX the "tethering" thread
+ * would have stayed in the C locale for the rest of its life, and on Windows
+ * the whole process would have. */
+static void _camera_handle_event(const dt_camctl_t *c, const dt_camera_t *cam,
+                                 CameraEventType event, gpointer data)
 {
-  CameraEventType event;
-  gpointer data;
-  // The blocking wait is deliberately OUTSIDE the locale guard. On Windows the
-  // guard falls back to a process-global setlocale(); holding "C" for the full
-  // 30s timeout would reformat numbers across the whole GUI. On POSIX the guard
-  // is per-thread and would be harmless, but keeping one code path for both
-  // platforms is worth more than the symmetry.
-  if(gp_camera_wait_for_event(cam->gpcam, 30, &event, &data, c->gpcontext) == GP_OK)
-  {
-    // Everything below talks to gphoto2, and these paths format and parse
-    // locale-sensitively. Guarding the whole handler is both cheaper and safer
-    // than wrapping call sites: the next change cannot forget it.
-    dt_camera_locale_guard_t guard = DT_CAMERA_LOCALE_GUARD_INIT;
-    _camctl_locale_guard_begin(&guard);
-    {
     if(event == GP_EVENT_UNKNOWN)
     {
       /* this is really some undefined behavior, seems like it's
@@ -2338,7 +2341,27 @@ static void _camera_poll_events(const dt_camctl_t *c,
         g_free(output);
       }
     }
-    }
+}
+static void _camera_poll_events(const dt_camctl_t *c,
+                                const dt_camera_t *cam)
+{
+  CameraEventType event;
+  gpointer data;
+  // The blocking wait is deliberately OUTSIDE the locale guard. On Windows the
+  // guard falls back to a process-global setlocale(); holding "C" for the full
+  // 30s timeout would reformat numbers across the whole GUI. On POSIX the guard
+  // is per-thread and would be harmless, but keeping one code path for both
+  // platforms is worth more than the symmetry.
+  if(gp_camera_wait_for_event(cam->gpcam, 30, &event, &data, c->gpcontext) == GP_OK)
+  {
+    // Everything the handler does talks to gphoto2, and these paths format and
+    // parse locale-sensitively: a comma-decimal locale makes a legitimate
+    // property value fail to parse, which is what #21445 was. Guard the whole
+    // handler - cheaper than wrapping call sites, and the next change cannot
+    // forget it.
+    dt_camera_locale_guard_t guard = DT_CAMERA_LOCALE_GUARD_INIT;
+    _camctl_locale_guard_begin(&guard);
+    _camera_handle_event(c, cam, event, data);
     _camctl_locale_guard_end(&guard);
   }
 }
