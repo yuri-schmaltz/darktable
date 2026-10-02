@@ -67,7 +67,7 @@ int main(void){
   ck(has(j,"\"input\": \"in/a.cr3\""),"input path",NULL);
   ck(has(j,"\"error\": \"no such file\""),"error string",NULL);
   ck(has(j,"\"error\": null"),"null error for ok row",NULL);
-  printf(j);
+  printf("%s", j);
   g_free(j); dt_cli_results_free(r);
 
   printf("\nD  escaping\n");

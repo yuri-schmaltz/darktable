@@ -18,7 +18,9 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 77
 fi
 
-BIN="$(dirname "$0")/test_cli_results_emit"
+# ctest passes $<TARGET_FILE:test_cli_results_emit>, which lives in the build
+# tree; fall back to a sibling binary for a manual run from the source tree.
+BIN="${1:-$(dirname "$0")/test_cli_results_emit}"
 if [ ! -x "$BIN" ]; then
   echo "SKIP: $BIN not built"
   exit 77

@@ -79,8 +79,14 @@ target_include_directories(test_cli_results_emit PRIVATE ${CMAKE_CURRENT_SOURCE_
 target_link_libraries(test_cli_results_emit PRIVATE glib-2.0)
 
 add_test(NAME test_cli_results_json
-         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_cli_results_json.sh)
-set_tests_properties(test_cli_results_json PROPERTIES DEPENDS test_cli_results_emit)
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_cli_results_json.sh
+                 $<TARGET_FILE:test_cli_results_emit>)
+# Exit 77 is this script's "skipped" signal, used when python3 is absent. Without
+# SKIP_RETURN_CODE ctest reports a skip as a failure, which would make a minimal
+# CI image look red for a reason that is not a defect.
+set_tests_properties(test_cli_results_json PROPERTIES
+                     SKIP_RETURN_CODE 77
+                     DEPENDS test_cli_results_emit)
 
 # Versioned request layer and the determinism contract. No JSON, no library, no
 # camera: the contract is plain C precisely so that it can be checked without

@@ -103,6 +103,11 @@ fprintf(stderr, "darktable %s\n"
                 "   --icc-file <file> specify icc filename, default to NONE\n"
                 "   --icc-intent <intent> specify icc intent, default to LAST\n"
                 "                     use --help icc-intent for list of supported intents\n"
+                "   --results         emit machine-readable JSON results on stdout\n"
+                "                     and exit with a contract code: 0 all inputs ok,\n"
+                "                     1 at least one input failed, 2 bad usage,\n"
+                "                     3 library or configuration unusable,\n"
+                "                     4 cancelled, 5 internal error\n"
                 "   --print-paths     print the resolved configdir, cachedir, tmpdir,\n"
                 "                     datadir, moduledir, localedir and library paths\n"
                 "                     for this install, then exit\n"
@@ -825,6 +830,13 @@ int main(int argc, char *arg[])
   // any longer ...
   g_strlcpy((char *)sdata, output_filename, DT_MAX_PATH_FOR_PARAMS);
   // all is good now, the last line didn't happen.
+  // Keep a copy for the results record. output_filename is freed on the very
+  // next line and the export loop runs hundreds of lines below it, so reading
+  // it in the loop is a use-after-free - it printed as binary garbage in the
+  // JSON. The value is the *pattern* ("out/$(FILE_NAME)"), because the
+  // per-image expansion happens inside the storage module and is not visible
+  // here; that is what the field documents.
+  char *results_output = g_strdup(output_filename);
   g_free(output_filename);
 
   format = dt_imageio_get_format_by_name(output_ext);
@@ -925,7 +937,7 @@ int main(int argc, char *arg[])
                                   icc_type, icc_filename, icc_intent, &metadata);
     if(rc != 0)
       res = 1;
-    dt_cli_results_add(results, res_path, rc == 0 ? output_filename : NULL,
+    dt_cli_results_add(results, res_path, rc == 0 ? results_output : NULL,
                        rc == 0 ? DT_CLI_EXIT_OK : DT_CLI_EXIT_JOB_FAILED,
                        rc == 0 ? NULL : "the storage module refused this image", 0.0);
     g_free(res_path);
@@ -945,6 +957,7 @@ int main(int argc, char *arg[])
 
   if(icc_filename)
     g_free(icc_filename);
+  g_free(results_output);
 
   dt_cleanup();
 
