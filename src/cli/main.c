@@ -905,17 +905,30 @@ int main(int argc, char *arg[])
       metadata.flags = dt_lib_export_metadata_default_flags();
       metadata.list = NULL;
     }
+    // Read the source path *before* handing the image to the storage module.
+    // dt_image_cache_get() takes the image cache lock; calling it afterwards
+    // meant asking for that lock once the storage module had finished with the
+    // image, and blocking there would stall a batch run over a string that is
+    // only a label. Take the lock, copy the name, drop it, then export.
+    char *res_path = NULL;
+    {
+      dt_image_t *res_image = dt_image_cache_get(id, 'r');
+      if(res_image)
+      {
+        res_path = g_strdup(res_image->filename);
+        dt_image_cache_read_release(res_image);
+      }
+    }
+
     const int rc = storage->store(storage, sdata, id, format, fdata, num, total,
                                   high_quality, upscale, FALSE, 1.0, export_masks,
                                   icc_type, icc_filename, icc_intent, &metadata);
     if(rc != 0)
       res = 1;
-    dt_image_t *res_image = dt_image_cache_get(id, 'r');
-    dt_cli_results_add(results, res_image ? res_image->filename : NULL,
-                      rc == 0 ? output_filename : NULL,
-                      rc == 0 ? DT_CLI_EXIT_OK : DT_CLI_EXIT_JOB_FAILED,
-                      rc == 0 ? NULL : "the storage module refused this image", 0.0);
-    if(res_image) dt_image_cache_read_release(res_image);
+    dt_cli_results_add(results, res_path, rc == 0 ? output_filename : NULL,
+                       rc == 0 ? DT_CLI_EXIT_OK : DT_CLI_EXIT_JOB_FAILED,
+                       rc == 0 ? NULL : "the storage module refused this image", 0.0);
+    g_free(res_path);
   }
 
   // The results are what a script branches on; the exit code is the coarse
