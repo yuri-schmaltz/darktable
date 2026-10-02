@@ -1,5 +1,8 @@
 include_directories(${DARKTABLE_BINDIR})
-add_executable(darktable-cli main.c)
+# results.c holds the exit code contract and the --results JSON schema
+# (dev-doc/automation-api-spec.md 2.4-2.5). Kept in its own translation
+# unit so the schema can be unit-tested without linking the whole CLI.
+add_executable(darktable-cli main.c results.c)
 
 set_target_properties(darktable-cli PROPERTIES LINKER_LANGUAGE C)
 target_link_libraries(darktable-cli lib_darktable whereami)

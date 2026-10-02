@@ -28,6 +28,7 @@
 #include "common/collection.h"
 #include "common/darktable.h"
 #include "common/debug.h"
+#include "results.h"
 #include "common/exif.h"
 #include "common/film.h"
 #include "common/file_location.h"
@@ -229,7 +230,7 @@ int main(int argc, char *arg[])
   dt_loc_get_localedir(localedir, sizeof(localedir));
   bindtextdomain(GETTEXT_PACKAGE, localedir);
 
-  if(!gtk_parse_args(&argc, &arg)) exit(1);
+  if(!gtk_parse_args(&argc, &arg)) exit(DT_CLI_EXIT_USAGE);
 
   // parse command line arguments
   char *input_filename = NULL;
@@ -244,6 +245,7 @@ int main(int argc, char *arg[])
            style_overwrite = FALSE, custom_presets = TRUE, export_masks = FALSE,
            output_to_dir = FALSE;
   gboolean print_paths = FALSE, print_paths_as_flags = FALSE;
+  gboolean want_json = FALSE;
 
   GList* inputs = NULL;
 
@@ -265,7 +267,7 @@ int main(int argc, char *arg[])
           if(!strcmp(arg[k+1], "icc-intent"))
             icc_intents();
         }
-        exit(1);
+        exit(DT_CLI_EXIT_LIBRARY);
       }
       else if(!strcmp(arg[k], "--version") || !strcmp(arg[k], "-v"))
       {
@@ -303,7 +305,7 @@ int main(int argc, char *arg[])
         {
           fprintf(stderr, "%s: %s\n", _("unknown option for --hq"), arg[k]);
           usage(arg[0]);
-          exit(1);
+          exit(DT_CLI_EXIT_USAGE);
         }
         g_free(str);
       }
@@ -319,7 +321,7 @@ int main(int argc, char *arg[])
         {
           fprintf(stderr, "%s: %s\n", _("unknown option for --export_masks"), arg[k]);
           usage(arg[0]);
-          exit(1);
+          exit(DT_CLI_EXIT_USAGE);
         }
         g_free(str);
       }
@@ -335,7 +337,7 @@ int main(int argc, char *arg[])
         {
           fprintf(stderr, "%s: %s\n", _("unknown option for --upscale"), arg[k]);
           usage(arg[0]);
-          exit(1);
+          exit(DT_CLI_EXIT_USAGE);
         }
         g_free(str);
       }
@@ -360,7 +362,7 @@ int main(int argc, char *arg[])
         {
           fprintf(stderr, "%s: %s\n", _("unknown option for --apply-custom-presets"), arg[k]);
           usage(arg[0]);
-          exit(1);
+          exit(DT_CLI_EXIT_USAGE);
         }
         g_free(str);
       }
@@ -371,7 +373,7 @@ int main(int argc, char *arg[])
         {
           fprintf(stderr, "%s: %s\n", _("too long ext for --out-ext"), arg[k]);
           usage(arg[0]);
-          exit(1);
+          exit(DT_CLI_EXIT_USAGE);
         }
         if(*arg[k] == '.')
         {
@@ -396,7 +398,7 @@ int main(int argc, char *arg[])
         {
           fprintf(stderr, _("empty in-memory library is useless for darktable cli export\n"));
           usage(arg[0]);
-          exit(1);
+          exit(DT_CLI_EXIT_USAGE);
         }
 
       }
@@ -410,7 +412,7 @@ int main(int argc, char *arg[])
           fprintf(stderr, _("incorrect ICC type for --icc-type: '%s'\n"), arg[k]);
           icc_types();
           usage(arg[0]);
-          exit(1);
+          exit(DT_CLI_EXIT_USAGE);
         }
       }
       else if(!strcmp(arg[k], "--icc-file") && argc > k + 1)
@@ -435,7 +437,7 @@ int main(int argc, char *arg[])
           fprintf(stderr, _("incorrect ICC intent for --icc-intent: '%s'\n"), arg[k]);
           icc_intents();
           usage(arg[0]);
-          exit(1);
+          exit(DT_CLI_EXIT_USAGE);
         }
       }
       else if(!strcmp(arg[k], "-v") || !strcmp(arg[k], "--verbose"))
@@ -447,6 +449,10 @@ int main(int argc, char *arg[])
         // everything from here on should be passed to the core
         k++;
         break;
+      }
+      else if(!strcmp(arg[k], "--results"))
+      {
+        want_json = TRUE;
       }
       else if(!strcmp(arg[k], "--print-paths"))
       {
@@ -531,7 +537,7 @@ int main(int argc, char *arg[])
     g_free(output_filename);
     g_free(output_ext);
     g_list_free_full(inputs, g_free);
-    exit(1);
+    exit(DT_CLI_EXIT_USAGE);
   }
 
   if(inputs && file_counter == 1)
@@ -609,7 +615,7 @@ int main(int argc, char *arg[])
       g_free(output_ext);
     if(inputs)
       g_list_free_full(inputs, g_free);
-    exit(1);
+    exit(DT_CLI_EXIT_USAGE);
   }
 
   // When --library was provided, use the DB history; otherwise keep XMP override mode.
@@ -700,7 +706,7 @@ int main(int argc, char *arg[])
     g_free(output_filename);
     if(output_ext)
       g_free(output_ext);
-    exit(1);
+    exit(DT_CLI_EXIT_JOB_FAILED);
   }
 
   // attach xmp, if requested:
@@ -718,7 +724,7 @@ int main(int argc, char *arg[])
         g_free(output_filename);
         if(output_ext)
           g_free(output_ext);
-        exit(1);
+        exit(DT_CLI_EXIT_USAGE);
       }
       // don't write new xmp:
       dt_image_cache_write_release(image, DT_IMAGE_CACHE_RELAXED);
@@ -748,7 +754,7 @@ int main(int argc, char *arg[])
       fprintf(stderr, _("too long output file extension: %s\n"), ext);
       usage(arg[0]);
       g_free(output_filename);
-      exit(1);
+      exit(DT_CLI_EXIT_USAGE);
     }
     else if(!ext || strlen(ext) <= 1)
     {
@@ -756,7 +762,7 @@ int main(int argc, char *arg[])
       fprintf(stderr, _("no output file extension given\n"));
       usage(arg[0]);
       g_free(output_filename);
-      exit(1);
+      exit(DT_CLI_EXIT_USAGE);
     }
     *ext = '\0';
     ext++;
@@ -802,7 +808,7 @@ int main(int argc, char *arg[])
     free(m_arg);
     g_free(output_filename);
     g_free(output_ext);
-    exit(1);
+    exit(DT_CLI_EXIT_LIBRARY);
   }
 
   sdata = storage->get_params(storage);
@@ -812,7 +818,7 @@ int main(int argc, char *arg[])
     free(m_arg);
     g_free(output_filename);
     g_free(output_ext);
-    exit(1);
+    exit(DT_CLI_EXIT_LIBRARY);
   }
 
   // and now for the really ugly hacks. don't tell your children about this one or they won't sleep at night
@@ -828,7 +834,7 @@ int main(int argc, char *arg[])
     fprintf(stderr, "\n");
     free(m_arg);
     g_free(output_ext);
-    exit(1);
+    exit(DT_CLI_EXIT_USAGE);
   }
 
   fdata = format->get_params(format);
@@ -837,7 +843,7 @@ int main(int argc, char *arg[])
     fprintf(stderr, "%s\n", _("failed to get parameters from format module, aborting export ..."));
     free(m_arg);
     g_free(output_ext);
-    exit(1);
+    exit(DT_CLI_EXIT_LIBRARY);
   }
 
   uint32_t w, h, fw, fh, sw, sh;
@@ -881,6 +887,7 @@ int main(int argc, char *arg[])
   // TODO: add a callback to set the bpp without going through the config
 
   int num = 1, res = 0;
+  dt_cli_results_t *results = dt_cli_results_new();
   for(GList *iter = id_list; iter; iter = g_list_next(iter), num++)
   {
     const int id = GPOINTER_TO_INT(iter->data);
@@ -898,11 +905,24 @@ int main(int argc, char *arg[])
       metadata.flags = dt_lib_export_metadata_default_flags();
       metadata.list = NULL;
     }
-    if(storage->store(storage, sdata, id, format, fdata, num, total, high_quality,
-                      upscale, FALSE, 1.0, export_masks,
-                      icc_type, icc_filename, icc_intent, &metadata) != 0)
+    const int rc = storage->store(storage, sdata, id, format, fdata, num, total,
+                                  high_quality, upscale, FALSE, 1.0, export_masks,
+                                  icc_type, icc_filename, icc_intent, &metadata);
+    if(rc != 0)
       res = 1;
+    dt_image_t *res_image = dt_image_cache_get(id, 'r');
+    dt_cli_results_add(results, res_image ? res_image->filename : NULL,
+                      rc == 0 ? output_filename : NULL,
+                      rc == 0 ? DT_CLI_EXIT_OK : DT_CLI_EXIT_JOB_FAILED,
+                      rc == 0 ? NULL : "the storage module refused this image", 0.0);
+    if(res_image) dt_image_cache_read_release(res_image);
   }
+
+  // The results are what a script branches on; the exit code is the coarse
+  // form of the same information. See dev-doc/automation-api-spec.md 2.4-2.5.
+  if(want_json)
+    dt_cli_results_print_json(results, stdout);
+  dt_cli_results_free(results);
 
   // cleanup time
   if(storage->finalize_store) storage->finalize_store(storage, sdata);
@@ -916,7 +936,7 @@ int main(int argc, char *arg[])
   dt_cleanup();
 
   free(m_arg);
-  exit(res);
+  exit(res == 0 ? DT_CLI_EXIT_OK : DT_CLI_EXIT_JOB_FAILED);
 }
 
 // clang-format off

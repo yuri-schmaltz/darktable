@@ -61,3 +61,23 @@ add_test(NAME test_locale_guard COMMAND test_locale_guard)
 
 add_executable(test_camera_detection test_camera_detection.c)
 add_test(NAME test_camera_detection COMMAND test_camera_detection)
+
+# darktable-cli exit code contract and --results JSON schema. Links only glib:
+# the schema is a contract, and a contract should be testable without a
+# library, a config dir, or a camera. test_cli_results.c also renders JSON
+# that the accompanying shell check re-parses with an independent parser, so a
+# malformed document fails the test rather than shipping.
+add_executable(test_cli_results test_cli_results.c ${CMAKE_CURRENT_SOURCE_DIR}/../../cli/results.c)
+target_include_directories(test_cli_results PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../cli)
+target_link_libraries(test_cli_results PRIVATE glib-2.0)
+add_test(NAME test_cli_results COMMAND test_cli_results)
+
+# The independent JSON validation described above: render a document, then
+# parse it with something that is not the code that wrote it.
+add_executable(test_cli_results_emit test_cli_results_emit.c ${CMAKE_CURRENT_SOURCE_DIR}/../../cli/results.c)
+target_include_directories(test_cli_results_emit PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../cli)
+target_link_libraries(test_cli_results_emit PRIVATE glib-2.0)
+
+add_test(NAME test_cli_results_json
+         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_cli_results_json.sh)
+set_tests_properties(test_cli_results_json PROPERTIES DEPENDS test_cli_results_emit)
